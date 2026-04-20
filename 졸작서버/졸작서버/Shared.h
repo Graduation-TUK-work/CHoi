@@ -2,25 +2,32 @@
 
 #pragma pack(push, 1)
 
-// 패킷 타입 (언리얼 uint8과 호환)
-enum EPacketType : unsigned char {
+// 플랫폼별 타입 처리
+#ifdef _WIN32
+#include <cstdint>
+typedef uint8_t uint8;
+typedef int32_t int32;
+#else
+#include "CoreMinimal.h"
+#endif
+
+enum EPacketType : uint8 {
     PKT_JOIN = 1,
     PKT_MOVE = 2,
 };
 
-// 언리얼 FVector를 담을 구조체
 struct FPlayerData {
-    int PlayerId;
+    int32 PlayerId;
     float X, Y, Z;
 };
 
 struct FPacketJoin {
-    unsigned char Type;
-    int MyId;
+    uint8 Type;
+    int32 MyId;
 };
 
 struct FPacketMove {
-    unsigned char Type;
+    uint8 Type;
     FPlayerData Data;
 };
 

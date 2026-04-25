@@ -65,8 +65,8 @@ DWORD WINAPI WorkerThread(LPVOID lpParam) {
             case PKT_MOVE: {
                 FPacketMove* movePkt = (FPacketMove*)pContext->buffer;
                 // 실시간 좌표 출력 (디버깅용)
-                printf("ID[%d] Move: X=%.1f, Y=%.1f, Z=%.1f\n",
-                    movePkt->Data.PlayerId, movePkt->Data.X, movePkt->Data.Y, movePkt->Data.Z);
+                printf("ID[%d] Type[%d] Move: X=%.1f, Y=%.1f, Z=%.1f, Yaw=%.1f\n",
+                    movePkt->Data.PlayerId, movePkt->Data.CharacterType, movePkt->Data.X, movePkt->Data.Y, movePkt->Data.Z, movePkt->Data.RotationYaw);
 
                 // 핵심: 나를 제외한 모든 클라이언트에게 이 좌표를 그대로 전달
                 Broadcast(pContext->buffer, sizeof(FPacketMove), pSession);

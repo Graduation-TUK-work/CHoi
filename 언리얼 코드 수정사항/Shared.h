@@ -26,9 +26,9 @@ struct FPlayerData {
     uint8 CharacterType;
     float X, Y, Z;
     float RotationYaw;
-    float ForwardValue;
-    float RightValue;
-    bool bIsSprinting;
+    float ForwardValue; // 앞뒤 입력 (-1.0 ~ 1.0)
+    float RightValue;   // 좌우 입력 (-1.0 ~ 1.0)
+    bool bIsSprinting;  // 달리기 상태
 };
 
 struct FPacketJoin {

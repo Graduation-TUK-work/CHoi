@@ -5,6 +5,9 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimInstance.h"
 #include "UObject/ConstructorHelpers.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -40,11 +43,44 @@ ATutorialCharacter::ATutorialCharacter()
     );
 
     static ConstructorHelpers::FObjectFinder<USkeletalMesh> SM(
-        TEXT("/Script/Engine.SkeletalMesh'/Game/Animation/Walking.Walking'")
+        TEXT("/Script/Engine.SkeletalMesh'/Game/Player/Player.Player'")
     );
     if (SM.Succeeded())
     {
         GetMesh()->SetSkeletalMesh(SM.Object);
+    }
+
+
+    static ConstructorHelpers::FObjectFinder<UAnimMontage> HitMontageAsset(
+        TEXT("/Script/Engine.AnimMontage'/Game/Animation/player/AM_Big_Kidney_Hit.AM_Big_Kidney_Hit'")
+    );
+    if (HitMontageAsset.Succeeded())
+    {
+        HitMontage = HitMontageAsset.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<UAnimMontage> DownedMontageAsset(
+        TEXT("/Script/Engine.AnimMontage'/Game/Animation/player/AM_Fallen_Idle.AM_Fallen_Idle'")
+    );
+    if (DownedMontageAsset.Succeeded())
+    {
+        DownedMontage = DownedMontageAsset.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<UAnimSequence> HitReactionAnimationAsset(
+        TEXT("/Script/Engine.AnimSequence'/Game/Animation/player/Big_Kidney_Hit.Big_Kidney_Hit'")
+    );
+    if (HitReactionAnimationAsset.Succeeded())
+    {
+        HitReactionAnimation = HitReactionAnimationAsset.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<UAnimSequence> DownedAnimationAsset(
+        TEXT("/Script/Engine.AnimSequence'/Game/Animation/player/Fallen_Idle.Fallen_Idle'")
+    );
+    if (DownedAnimationAsset.Succeeded())
+    {
+        DownedAnimation = DownedAnimationAsset.Object;
     }
 
     
@@ -70,7 +106,13 @@ ATutorialCharacter::ATutorialCharacter()
 
 void ATutorialCharacter::BeginPlay()
 {
-    Super::BeginPlay();
+        Super::BeginPlay();
+
+    if (UClass* SurvivorAnimClass = LoadClass<UAnimInstance>(nullptr, TEXT("/Game/BP/ABP_TutorialAnim.ABP_TutorialAnim_C")))
+    {
+        GetMesh()->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+        GetMesh()->SetAnimInstanceClass(SurvivorAnimClass);
+    }
 
     if (IsPlayerControlled() && IsLocallyControlled())
     {
@@ -342,49 +384,66 @@ void ATutorialCharacter::CancelInteraction()
 
 void ATutorialCharacter::PlayHitReaction()
 {
-    // 1. 이미 누워있거나, '피격 쿨타임' 중이라면 함수 실행 안 함
-    if (IsDowned || !bCanBeHit) return;
+    ApplyHitReaction(true);
+}
 
-    // 2. 일단 맞았으니 즉시 무적 상태로 전환
+void ATutorialCharacter::PlayNetworkHitReaction()
+{
+    ApplyHitReaction(false);
+}
+
+void ATutorialCharacter::ForceDownedState()
+{
+    CurrentHealth = 0;
+    IsDowned = true;
     bCanBeHit = false;
 
-    // 3. 체력 감소 및 로그
+    if (DownedAnimation)
+    {
+        PlayLoopBodyAnimation(DownedAnimation);
+    }
+    else if (DownedMontage)
+    {
+        PlayAnimMontage(DownedMontage);
+    }
+
+    GetCapsuleComponent()->SetCapsuleHalfHeight(30.0f);
+    GetCharacterMovement()->DisableMovement();
+    bUseControllerRotationYaw = false;
+
+    UE_LOG(LogTemp, Error, TEXT("도망자 빈사 상태(Downed)!"));
+}
+void ATutorialCharacter::ApplyHitReaction(bool bRespectCooldown)
+{
+    if (IsDowned) return;
+    if (bRespectCooldown && !bCanBeHit) return;
+
+    bCanBeHit = false;
     CurrentHealth--;
     UE_LOG(LogTemp, Warning, TEXT("도망자 피격됨! 남은 체력: %d"), CurrentHealth);
 
-    // 4. 체력에 따른 분기 처리
     if (CurrentHealth > 0)
     {
-        if (HitMontage)
+        if (HitReactionAnimation)
+        {
+            PlayTemporaryBodyAnimation(HitReactionAnimation);
+        }
+        else if (HitMontage)
         {
             PlayAnimMontage(HitMontage);
         }
 
-        // --- 피격 무적 타이머 설정 ---
-        // 살인마의 공격 판정이 완전히 끝날 때까지(약 0.5초~0.8초) 다시 안 맞게 설정
         FTimerHandle HitCooldownTimer;
         GetWorldTimerManager().SetTimer(HitCooldownTimer, FTimerDelegate::CreateLambda([this]()
             {
                 bCanBeHit = true;
                 UE_LOG(LogTemp, Log, TEXT("도망자 이제 다시 맞을 수 있음"));
             }), 1.0f, false);
-        // --------------------------
     }
     else
     {
-        // 두 번째 타격: 빈사(눕기)
-        IsDowned = true;
+        ForceDownedState();
 
-        if (DownedMontage)
-        {
-            PlayAnimMontage(DownedMontage);
-        }
-
-        GetCapsuleComponent()->SetCapsuleHalfHeight(30.0f);
-        GetCharacterMovement()->DisableMovement();
-        bUseControllerRotationYaw = false;
-
-        UE_LOG(LogTemp, Error, TEXT("도망자 빈사 상태(Downed)!"));
     }
 }
 
@@ -486,13 +545,30 @@ void ATutorialCharacter::HandleNetworkAction(uint8 ActionType, int32 InstigatorI
 
     if (ActionType == ACTION_SURVIVOR_HIT)
     {
-        if (TargetId == MyPlayerId)
+        const bool bForceDown = TargetId < 0;
+        const int32 RealTargetId = bForceDown ? -TargetId : TargetId;
+
+        if (RealTargetId == MyPlayerId || (RealTargetId > 0 && !RemotePlayers.Contains(RealTargetId)))
         {
-            PlayHitReaction();
+            if (bForceDown)
+            {
+                ForceDownedState();
+            }
+            else
+            {
+                PlayNetworkHitReaction();
+            }
         }
-        else if (RemotePlayers.Contains(TargetId) && IsValid(RemotePlayers[TargetId]))
+        else if (RemotePlayers.Contains(RealTargetId) && IsValid(RemotePlayers[RealTargetId]))
         {
-            RemotePlayers[TargetId]->PlayHitReaction();
+            if (bForceDown)
+            {
+                RemotePlayers[RealTargetId]->ForceDownedState();
+            }
+            else
+            {
+                RemotePlayers[RealTargetId]->PlayNetworkHitReaction();
+            }
         }
         return;
     }
@@ -521,6 +597,48 @@ void ATutorialCharacter::HandleNetworkAction(uint8 ActionType, int32 InstigatorI
             Survivor->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
             Survivor->GetCharacterMovement()->DisableMovement();
             Survivor->AttachToComponent(Killer->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, FName("CarrySocket"));
+            Killer->PlayCarryAnimation();
+        }
+    }
+}
+
+void ATutorialCharacter::PlayTemporaryBodyAnimation(UAnimSequence* Animation)
+{
+    if (!Animation || !GetMesh())
+    {
+        return;
+    }
+
+    GetMesh()->PlayAnimation(Animation, false);
+
+    FTimerHandle RestoreAnimTimer;
+    GetWorldTimerManager().SetTimer(
+        RestoreAnimTimer,
+        this,
+        &ATutorialCharacter::RestoreBodyAnimClass,
+        Animation->GetPlayLength(),
+        false
+    );
+}
+
+void ATutorialCharacter::PlayLoopBodyAnimation(UAnimSequence* Animation)
+{
+    if (!Animation || !GetMesh())
+    {
+        return;
+    }
+
+    GetMesh()->PlayAnimation(Animation, true);
+}
+
+void ATutorialCharacter::RestoreBodyAnimClass()
+{
+    if (GetMesh() && !IsDowned && !IsBeingCarried)
+    {
+        if (UClass* SurvivorAnimClass = LoadClass<UAnimInstance>(nullptr, TEXT("/Game/BP/ABP_TutorialAnim.ABP_TutorialAnim_C")))
+        {
+            GetMesh()->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+            GetMesh()->SetAnimInstanceClass(SurvivorAnimClass);
         }
     }
 }

@@ -9,6 +9,7 @@
 
 class FNetworkWorker;
 class ATutorialCharacter;
+class UAnimSequence;
 
 UCLASS()
 class MYPROJECT_START_API AKillerCharacter : public ACharacter
@@ -67,6 +68,7 @@ public:
     void UpdateRemoteSurvivor(int32 PlayerId, FVector Location, float RotationYaw, float Forward, float Right, bool bSprint);
     void HandleNetworkAction(uint8 ActionType, int32 InstigatorId, int32 TargetId, FVector Location, float RotationYaw);
     void SendActionToServer(uint8 ActionType, int32 TargetId = -1);
+    void PlayCarryAnimation();
 
     UPROPERTY()
     float MoveForwardValue = 0;
@@ -85,9 +87,19 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
     class UAnimMontage* AttackMontage;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    UAnimSequence* BodyAttackAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    UAnimSequence* CarryAnimation;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     UCameraComponent* FPSCamerComponent;
 
     UPROPERTY(VisibleDefaultsOnly, Category = "Mesh")
     USkeletalMeshComponent* FPSMesh;
+
+private:
+    void PlayTemporaryBodyAnimation(UAnimSequence* Animation);
+    void RestoreBodyAnimClass();
 };

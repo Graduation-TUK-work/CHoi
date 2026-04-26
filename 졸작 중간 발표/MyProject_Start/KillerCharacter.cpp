@@ -3,7 +3,10 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimSequence.h"
 #include "DrawDebugHelpers.h"
+#include "UObject/ConstructorHelpers.h"
 #include "MyProject_Start/Player/TutorialCharacter.h"
 #include "MyProject_Start/NetworkWorker.h"
 #include "Networking.h"
@@ -29,6 +32,43 @@ AKillerCharacter::AKillerCharacter()
 
     // 아까 해결한 바운드 스케일 코드 적용 (깜빡임 방지)
     FPSMesh->BoundsScale = 5.0f;
+    GetMesh()->SetRelativeLocationAndRotation(
+        FVector(0.0f, 0.0f, -88.0f),
+        FRotator(0.0f, -90.0f, 0.0f)
+    );
+
+    static ConstructorHelpers::FObjectFinder<USkeletalMesh> KillerMesh(
+        TEXT("/Script/Engine.SkeletalMesh'/Game/zombi/zombi.zombi'")
+    );
+    if (KillerMesh.Succeeded())
+    {
+        GetMesh()->SetSkeletalMesh(KillerMesh.Object);
+    }
+
+
+    static ConstructorHelpers::FObjectFinder<UAnimMontage> AttackMontageAsset(
+        TEXT("/Script/Engine.AnimMontage'/Game/Animation/zombi/AM_arm_Attack.AM_arm_Attack'")
+    );
+    if (AttackMontageAsset.Succeeded())
+    {
+        AttackMontage = AttackMontageAsset.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<UAnimSequence> BodyAttackAnimationAsset(
+        TEXT("/Script/Engine.AnimSequence'/Game/Animation/zombi/atack.atack'")
+    );
+    if (BodyAttackAnimationAsset.Succeeded())
+    {
+        BodyAttackAnimation = BodyAttackAnimationAsset.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<UAnimSequence> CarryAnimationAsset(
+        TEXT("/Script/Engine.AnimSequence'/Game/Animation/zombi/Walk_With.Walk_With'")
+    );
+    if (CarryAnimationAsset.Succeeded())
+    {
+        CarryAnimation = CarryAnimationAsset.Object;
+    }
 
     // 3인칭 바디는 자신에게 보이지 않게 설정
     GetMesh()->SetOwnerNoSee(true);
@@ -42,7 +82,22 @@ AKillerCharacter::AKillerCharacter()
 
 void AKillerCharacter::BeginPlay()
 {
-    Super::BeginPlay();
+        Super::BeginPlay();
+
+    if (UClass* KillerAnimClass = LoadClass<UAnimInstance>(nullptr, TEXT("/Game/BP/ABP_Zombi.ABP_Zombi_C")))
+    {
+        GetMesh()->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+        GetMesh()->SetAnimInstanceClass(KillerAnimClass);
+    }
+
+    if (FPSMesh)
+    {
+        if (UClass* KillerArmAnimClass = LoadClass<UAnimInstance>(nullptr, TEXT("/Game/BP/ABP_zombi_Arm.ABP_zombi_Arm_C")))
+        {
+            FPSMesh->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+            FPSMesh->SetAnimInstanceClass(KillerArmAnimClass);
+        }
+    }
 
     if (IsPlayerControlled() && IsLocallyControlled())
     {
@@ -128,23 +183,53 @@ void AKillerCharacter::MoveRight(float AxisValue)
 // --- 공격 로직 ---
 void AKillerCharacter::StartAttack()
 {
-    // 공격 중이 아닐 때만 공격 실행
-    if (!bIsAttacking && AttackMontage)
+    if (bIsAttacking || (!AttackMontage && !BodyAttackAnimation))
     {
-        UAnimInstance* AnimInstance = FPSMesh->GetAnimInstance();
-        if (AnimInstance)
-        {
-            AnimInstance->Montage_Play(AttackMontage);
-            bIsAttacking = true;
-            bHasDealtDamage = false;
+        return;
+    }
 
-            GetCharacterMovement()->MaxWalkSpeed = 200.0f;
-        }
-        UE_LOG(LogTemp, Warning, TEXT("StartAttack called"));
-        if (IsPlayerControlled() && IsLocallyControlled())
+    bool bPlayedMontage = false;
+    if (IsPlayerControlled() && IsLocallyControlled() && FPSMesh && AttackMontage)
+    {
+        if (UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance())
         {
-            SendActionToServer(ACTION_KILLER_ATTACK);
+            FPSAnimInstance->Montage_Play(AttackMontage);
+            bPlayedMontage = true;
         }
+    }
+
+    if ((!IsPlayerControlled() || !IsLocallyControlled()) && BodyAttackAnimation)
+    {
+        PlayTemporaryBodyAnimation(BodyAttackAnimation);
+        bPlayedMontage = true;
+    }
+    else if (!bPlayedMontage && AttackMontage)
+    {
+        bPlayedMontage = PlayAnimMontage(AttackMontage) > 0.0f;
+    }
+
+    if (bPlayedMontage)
+    {
+        bIsAttacking = true;
+        bHasDealtDamage = false;
+        GetCharacterMovement()->MaxWalkSpeed = 600.0f;
+
+        const bool bLocalAttacker = IsPlayerControlled() && IsLocallyControlled();
+        const float AttackDuration = bLocalAttacker && AttackMontage ? AttackMontage->GetPlayLength() : (BodyAttackAnimation ? BodyAttackAnimation->GetPlayLength() : 0.8f);
+        FTimerHandle AttackEndTimer;
+        GetWorldTimerManager().SetTimer(
+            AttackEndTimer,
+            this,
+            &AKillerCharacter::EndAttack,
+            FMath::Max(AttackDuration, 0.2f),
+            false
+        );
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("StartAttack called"));
+    if (IsPlayerControlled() && IsLocallyControlled())
+    {
+        SendActionToServer(ACTION_KILLER_ATTACK);
     }
 }
 
@@ -159,40 +244,57 @@ void AKillerCharacter::EndAttack()
 
 void AKillerCharacter::CheckHit()
 {
-    // [보완] 이미 이번 휘두르기에서 누군가를 때렸다면 함수를 즉시 종료 (중복 피격 방지)
+    if (!IsPlayerControlled() || !IsLocallyControlled()) return;
     if (bHasDealtDamage) return;
 
     FVector Start = FPSCamerComponent->GetComponentLocation();
-    FVector ForwardVector = FPSCamerComponent->GetForwardVector();
+    FVector ForwardVector = FPSCamerComponent->GetForwardVector().GetSafeNormal();
     FVector End = Start + (ForwardVector * AttackRange);
 
-    FHitResult HitResult;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(this);
+    ATutorialCharacter* Victim = nullptr;
+    float BestDistance = AttackRange;
 
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult, Start, End, ECC_Pawn, Params
-    );
-
-    DrawDebugLine(GetWorld(), Start, End, bHit ? FColor::Green : FColor::Red, false, 1.0f, 0, 2.0f);
-
-    if (bHit && HitResult.GetActor())
+    for (TPair<int32, ATutorialCharacter*>& Pair : RemoteSurvivors)
     {
-        ATutorialCharacter* Victim = Cast<ATutorialCharacter>(HitResult.GetActor());
-
-        if (Victim)
+        ATutorialCharacter* Candidate = Pair.Value;
+        if (!IsValid(Candidate) || Candidate->IsBeingCarried)
         {
-            // [핵심] 타격 성공 시 플래그를 true로 설정하여 이번 공격 세션 종료
-            bHasDealtDamage = true;
+            continue;
+        }
 
-            // 도망자 피격 함수 호출
-            Victim->PlayHitReaction();
-            SendActionToServer(ACTION_SURVIVOR_HIT, Victim->MyPlayerId);
+        FVector ToCandidate = Candidate->GetActorLocation() - Start;
+        const float ForwardDistance = FVector::DotProduct(ToCandidate, ForwardVector);
+        if (ForwardDistance < 0.0f || ForwardDistance > AttackRange)
+        {
+            continue;
+        }
 
-            UE_LOG(LogTemp, Warning, TEXT("Hit Target: %s"), *Victim->GetName());
-            DrawDebugSphere(GetWorld(), HitResult.Location, 10.0f, 12, FColor::Yellow, false, 1.0f);
+        const float SideDistance = (ToCandidate - ForwardVector * ForwardDistance).Size();
+        if (SideDistance > 100.0f)
+        {
+            continue;
+        }
+
+        if (ForwardDistance < BestDistance)
+        {
+            BestDistance = ForwardDistance;
+            Victim = Candidate;
         }
     }
+
+    DrawDebugLine(GetWorld(), Start, End, Victim ? FColor::Green : FColor::Red, false, 1.0f, 0, 2.0f);
+
+    if (Victim)
+    {
+        bHasDealtDamage = true;
+        Victim->PlayNetworkHitReaction();
+        const int32 HitTargetId = Victim->IsDowned ? -Victim->MyPlayerId : Victim->MyPlayerId;
+        SendActionToServer(ACTION_SURVIVOR_HIT, HitTargetId);
+
+        UE_LOG(LogTemp, Warning, TEXT("Hit Target: %s / ID: %d"), *Victim->GetName(), Victim->MyPlayerId);
+        DrawDebugSphere(GetWorld(), Victim->GetActorLocation(), 20.0f, 12, FColor::Yellow, false, 1.0f);
+    }
+
     UE_LOG(LogTemp, Warning, TEXT("CheckHit called | bHasDealtDamage = %s"), bHasDealtDamage ? TEXT("true") : TEXT("false"));
 }
 
@@ -202,37 +304,52 @@ void AKillerCharacter::PickupSurvivor()
     if (CarriedSurvivor) return;
 
     FVector Start = FPSCamerComponent->GetComponentLocation();
-    FVector End = Start + (FPSCamerComponent->GetForwardVector() * AttackRange);
-    FHitResult Hit;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(this);
+    FVector ForwardVector = FPSCamerComponent->GetForwardVector().GetSafeNormal();
 
-    if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Params))
+    ATutorialCharacter* Target = nullptr;
+    float BestDistance = AttackRange;
+
+    for (TPair<int32, ATutorialCharacter*>& Pair : RemoteSurvivors)
     {
-        ATutorialCharacter* Target = Cast<ATutorialCharacter>(Hit.GetActor());
-
-        if (Target && Target->IsDowned)
+        ATutorialCharacter* Candidate = Pair.Value;
+        if (!IsValid(Candidate) || !Candidate->IsDowned || Candidate->IsBeingCarried)
         {
-            CarriedSurvivor = Target;
-
-            // --- [여기에 추가!] 생존자에게 들린 상태임을 알림 ---
-            CarriedSurvivor->IsBeingCarried = true;
-            // ------------------------------------------------
-
-            // 1. 생존자의 물리 및 충돌 끄기
-            CarriedSurvivor->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            CarriedSurvivor->GetCharacterMovement()->DisableMovement();
-
-            // 2. 살인마의 소켓에 생존자 부착
-            CarriedSurvivor->AttachToComponent(GetMesh(),
-                FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-                FName("CarrySocket"));
-
-            UE_LOG(LogTemp, Warning, TEXT("생존자를 들었습니다!"));
-
-            if (PickupMontage) PlayAnimMontage(PickupMontage);
-            SendActionToServer(ACTION_SURVIVOR_PICKUP, CarriedSurvivor->MyPlayerId);
+            continue;
         }
+
+        FVector ToCandidate = Candidate->GetActorLocation() - Start;
+        const float ForwardDistance = FVector::DotProduct(ToCandidate, ForwardVector);
+        if (ForwardDistance < 0.0f || ForwardDistance > AttackRange)
+        {
+            continue;
+        }
+
+        const float SideDistance = (ToCandidate - ForwardVector * ForwardDistance).Size();
+        if (SideDistance > 120.0f)
+        {
+            continue;
+        }
+
+        if (ForwardDistance < BestDistance)
+        {
+            BestDistance = ForwardDistance;
+            Target = Candidate;
+        }
+    }
+
+    if (Target && Target->IsDowned)
+    {
+        CarriedSurvivor = Target;
+        CarriedSurvivor->IsBeingCarried = true;
+        CarriedSurvivor->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        CarriedSurvivor->GetCharacterMovement()->DisableMovement();
+        CarriedSurvivor->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, FName("CarrySocket"));
+
+        UE_LOG(LogTemp, Warning, TEXT("생존자를 들었습니다!"));
+
+        PlayCarryAnimation();
+        if (PickupMontage) PlayAnimMontage(PickupMontage);
+        SendActionToServer(ACTION_SURVIVOR_PICKUP, CarriedSurvivor->MyPlayerId);
     }
 }
 void AKillerCharacter::SendLocationToServer()
@@ -384,9 +501,19 @@ void AKillerCharacter::HandleNetworkAction(uint8 ActionType, int32 InstigatorId,
 
     if (ActionType == ACTION_SURVIVOR_HIT)
     {
-        if (RemoteSurvivors.Contains(TargetId) && IsValid(RemoteSurvivors[TargetId]))
+        const bool bForceDown = TargetId < 0;
+        const int32 RealTargetId = bForceDown ? -TargetId : TargetId;
+
+        if (RemoteSurvivors.Contains(RealTargetId) && IsValid(RemoteSurvivors[RealTargetId]))
         {
-            RemoteSurvivors[TargetId]->PlayHitReaction();
+            if (bForceDown)
+            {
+                RemoteSurvivors[RealTargetId]->ForceDownedState();
+            }
+            else
+            {
+                RemoteSurvivors[RealTargetId]->PlayNetworkHitReaction();
+            }
         }
         return;
     }
@@ -416,6 +543,48 @@ void AKillerCharacter::HandleNetworkAction(uint8 ActionType, int32 InstigatorId,
             Survivor->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
             Survivor->GetCharacterMovement()->DisableMovement();
             Survivor->AttachToComponent(Killer->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, FName("CarrySocket"));
+            Killer->PlayCarryAnimation();
+        }
+    }
+}
+
+void AKillerCharacter::PlayTemporaryBodyAnimation(UAnimSequence* Animation)
+{
+    if (!Animation || !GetMesh())
+    {
+        return;
+    }
+
+    GetMesh()->PlayAnimation(Animation, false);
+
+    FTimerHandle RestoreAnimTimer;
+    GetWorldTimerManager().SetTimer(
+        RestoreAnimTimer,
+        this,
+        &AKillerCharacter::RestoreBodyAnimClass,
+        Animation->GetPlayLength(),
+        false
+    );
+}
+
+void AKillerCharacter::PlayCarryAnimation()
+{
+    if (!CarryAnimation || !GetMesh())
+    {
+        return;
+    }
+
+    GetMesh()->PlayAnimation(CarryAnimation, true);
+}
+
+void AKillerCharacter::RestoreBodyAnimClass()
+{
+    if (GetMesh())
+    {
+        if (UClass* KillerAnimClass = LoadClass<UAnimInstance>(nullptr, TEXT("/Game/BP/ABP_Zombi.ABP_Zombi_C")))
+        {
+            GetMesh()->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+            GetMesh()->SetAnimInstanceClass(KillerAnimClass);
         }
     }
 }

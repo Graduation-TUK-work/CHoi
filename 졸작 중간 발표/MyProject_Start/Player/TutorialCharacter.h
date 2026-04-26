@@ -11,6 +11,7 @@
 // 1. 전방 선언: 클래스 포인터를 사용하기 위해 선언합니다.
 class FNetworkWorker;
 class AKillerCharacter;
+class UAnimSequence;
 
 UCLASS()
 class MYPROJECT_START_API ATutorialCharacter : public ACharacter
@@ -52,7 +53,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
 	class UAnimMontage* DownedMontage;
 
-	// 빈사 상태인지 확인하는 변수
+	
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    UAnimSequence* HitReactionAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    UAnimSequence* DownedAnimation;
+// 빈사 상태인지 확인하는 변수
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	bool IsDowned = false;
 
@@ -111,6 +118,8 @@ public:
 	// 살인마의 CheckHit에서 호출할 함수
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void PlayHitReaction();
+	void PlayNetworkHitReaction();
+	void ForceDownedState();
 
 	// ------------------------------------------------------------
 	// 3. 서버 관련 멤버 변수
@@ -148,5 +157,11 @@ protected:
 
 	bool bIsVaultMoving = false;
 	float VaultAlpha = 0.0f;
+
+private:
+    void ApplyHitReaction(bool bRespectCooldown);
+    void PlayTemporaryBodyAnimation(UAnimSequence* Animation);
+    void PlayLoopBodyAnimation(UAnimSequence* Animation);
+    void RestoreBodyAnimClass();
 
 };

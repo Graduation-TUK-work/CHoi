@@ -64,17 +64,21 @@ DWORD WINAPI WorkerThread(LPVOID lpParam) {
             switch (packetType) {
             case PKT_MOVE: {
                 FPacketMove* movePkt = (FPacketMove*)pContext->buffer;
-                // 실시간 좌표 출력 (디버깅용)
                 printf("ID[%d] Type[%d] Move: X=%.1f, Y=%.1f, Z=%.1f, Yaw=%.1f\n",
                     movePkt->Data.PlayerId, movePkt->Data.CharacterType, movePkt->Data.X, movePkt->Data.Y, movePkt->Data.Z, movePkt->Data.RotationYaw);
-
-                // 핵심: 나를 제외한 모든 클라이언트에게 이 좌표를 그대로 전달
                 Broadcast(pContext->buffer, sizeof(FPacketMove), pSession);
+                break;
+            }
+            case PKT_ACTION: {
+                FPacketAction* actionPkt = (FPacketAction*)pContext->buffer;
+                printf("ID[%d] Action[%d] Target[%d]\n",
+                    actionPkt->InstigatorId, actionPkt->ActionType, actionPkt->TargetId);
+                Broadcast(pContext->buffer, sizeof(FPacketAction), pSession);
                 break;
             }
             }
 
-            // 다음 패킷 수신 예약 (낚싯대 재투척)
+            // 다음 패킷 수신 예약
             DWORD flags = 0;
             DWORD recvBytes = 0;
             memset(&pContext->overlapped, 0, sizeof(OVERLAPPED));

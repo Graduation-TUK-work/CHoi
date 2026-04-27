@@ -183,6 +183,11 @@ void AKillerCharacter::MoveRight(float AxisValue)
 // --- 공격 로직 ---
 void AKillerCharacter::StartAttack()
 {
+    if (bIsAttacking && (!IsPlayerControlled() || !IsLocallyControlled()))
+    {
+        bIsAttacking = false;
+    }
+
     if (bIsAttacking || (!AttackMontage && !BodyAttackAnimation))
     {
         return;
@@ -579,6 +584,9 @@ void AKillerCharacter::PlayCarryAnimation()
 
 void AKillerCharacter::RestoreBodyAnimClass()
 {
+    bIsAttacking = false;
+    bHasDealtDamage = false;
+
     if (GetMesh())
     {
         if (UClass* KillerAnimClass = LoadClass<UAnimInstance>(nullptr, TEXT("/Game/BP/ABP_Zombi.ABP_Zombi_C")))

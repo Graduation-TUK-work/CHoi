@@ -128,7 +128,13 @@ void AKillerCharacter::BeginPlay()
 
         if (NetworkWorker == nullptr)
         {
-            NetworkWorker = new FNetworkWorker(FNetworkWorker::GetDefaultServerIP(), FNetworkWorker::GetDefaultServerPort());
+            FString ServerIP = FNetworkWorker::GetDefaultServerIP();
+            if (UMyGameInstance* GI = GetGameInstance<UMyGameInstance>())
+            {
+                ServerIP = GI->GetServerIP();
+            }
+
+            NetworkWorker = new FNetworkWorker(ServerIP, FNetworkWorker::GetDefaultServerPort());
             NetworkWorker->SetOwnerKiller(this);
             if (UMyGameInstance* GI = GetGameInstance<UMyGameInstance>())
             {

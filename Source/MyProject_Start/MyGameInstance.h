@@ -16,6 +16,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lobby")
     FName GameLevelName = TEXT("/Game/Stage_1");
 
+    UPROPERTY(BlueprintReadWrite, Category = "Network")
+    FString ServerIP;
+
     UFUNCTION(BlueprintCallable, Category = "Lobby")
     void SelectKiller();
 
@@ -42,4 +45,10 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Lobby")
     void SendReady();
+
+    UFUNCTION(BlueprintCallable, Category = "Network")
+    void SetServerIP(const FString& InServerIP);
+
+    UFUNCTION(BlueprintPure, Category = "Network")
+    FString GetServerIP() const;
 };

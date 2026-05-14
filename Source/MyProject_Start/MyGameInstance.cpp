@@ -1,7 +1,21 @@
 ﻿#include "MyGameInstance.h"
 
 #include "Kismet/GameplayStatics.h"
+#include "NetworkWorker.h"
 #include "Shared.h"
+
+void UMyGameInstance::SetServerIP(const FString& InServerIP)
+{
+    ServerIP = InServerIP;
+    ServerIP.TrimStartAndEndInline();
+}
+
+FString UMyGameInstance::GetServerIP() const
+{
+    FString Result = ServerIP;
+    Result.TrimStartAndEndInline();
+    return Result.IsEmpty() ? FNetworkWorker::GetDefaultServerIP() : Result;
+}
 
 void UMyGameInstance::SelectKiller()
 {

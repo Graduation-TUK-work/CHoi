@@ -155,7 +155,13 @@ void ATutorialCharacter::BeginPlay()
     }
     if (IsPlayerControlled() && IsLocallyControlled())
     {
-        NetworkWorker = new FNetworkWorker(FNetworkWorker::GetDefaultServerIP(), FNetworkWorker::GetDefaultServerPort());
+        FString ServerIP = FNetworkWorker::GetDefaultServerIP();
+        if (UMyGameInstance* GI = GetGameInstance<UMyGameInstance>())
+        {
+            ServerIP = GI->GetServerIP();
+        }
+
+        NetworkWorker = new FNetworkWorker(ServerIP, FNetworkWorker::GetDefaultServerPort());
         NetworkWorker->SetOwnerCharacter(this);
         if (UMyGameInstance* GI = GetGameInstance<UMyGameInstance>())
         {
@@ -182,6 +188,7 @@ void ATutorialCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ATutorialCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+
     if (!IsInteracting)
     {
         TraceForInteractable();

@@ -21,6 +21,18 @@
 #include "MyProject_Start/Generator.h"
 #include "Networking.h"    // �߰�
 #include "Sockets.h"       // �߰�
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Styling/SlateBrush.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SConstraintCanvas.h"
+#include "Widgets/Notifications/SProgressBar.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/Text/STextBlock.h"
 
 ATutorialCharacter::ATutorialCharacter()
 {
@@ -155,6 +167,8 @@ void ATutorialCharacter::BeginPlay()
     }
     if (IsPlayerControlled() && IsLocallyControlled())
     {
+        ShowGeneratorRepairWidget(nullptr);
+
         FString ServerIP = FNetworkWorker::GetDefaultServerIP();
         if (UMyGameInstance* GI = GetGameInstance<UMyGameInstance>())
         {
@@ -180,6 +194,8 @@ void ATutorialCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
         // �޸� ������ �Ҹ��ڿ��� ó����
     }
 
+    HideGeneratorRepairWidget();
+
     Super::EndPlay(EndPlayReason);
     RemotePlayers.Empty();
     RemoteKillers.Empty();
@@ -196,6 +212,11 @@ void ATutorialCharacter::Tick(float DeltaTime)
 
     if (IsPlayerControlled() && IsLocallyControlled())
     {
+        if (!GeneratorRepairWidget.IsValid())
+        {
+            ShowGeneratorRepairWidget(nullptr);
+        }
+
         SendLocationToServer();
     }
 
@@ -218,10 +239,24 @@ void ATutorialCharacter::Tick(float DeltaTime)
         // ?�리가 ???�났???�만 ?�데?�트 ?�행
         IInteractionInterface::Execute_UpdateInteract(CurrentInteractable, DeltaTime);
 
+        if (Generator)
+        {
+            UpdateGeneratorRepairWidget(Generator);
+
+            GeneratorRepairSyncAccumulator += DeltaTime;
+            if (GeneratorRepairSyncAccumulator >= 0.15f)
+            {
+                GeneratorRepairSyncAccumulator = 0.f;
+                SendGeneratorActionToServer(ACTION_GENERATOR_START, Generator);
+            }
+        }
+
         if (Generator && !bWasGeneratorRepaired && Generator->bIsRepaired)
         {
             SendGeneratorActionToServer(ACTION_GENERATOR_COMPLETE, Generator);
             SetRepairingGenerator(false);
+            GeneratorRepairSyncAccumulator = 0.f;
+            UpdateGeneratorRepairWidget(Generator);
             ShowGeneratorRepairCount();
             IsInteracting = false;
         }
@@ -485,6 +520,13 @@ void ATutorialCharacter::TraceForInteractable()
             AGenerator* Generator = Cast<AGenerator>(CurrentInteractable);
             IInteractionInterface::Execute_CancelInteract(CurrentInteractable);
             IsInteracting = false;
+            SetRepairingGenerator(false);
+            if (Generator)
+        {
+            const int32 CancelledGeneratorIndex = FMath::Clamp(Generator->GetGeneratorId(), 0, 2);
+            GeneratorRepairProgressValues[CancelledGeneratorIndex] = 0.f;
+        }
+        UpdateGeneratorRepairWidget(nullptr);
 
             if (Generator)
             {
@@ -523,6 +565,7 @@ void ATutorialCharacter::StartInteraction()
         if (AGenerator* Generator = Cast<AGenerator>(CurrentInteractable))
         {
             SetRepairingGenerator(true);
+            UpdateGeneratorRepairWidget(Generator);
             SendGeneratorActionToServer(ACTION_GENERATOR_START, Generator);
         }
     }
@@ -536,6 +579,13 @@ void ATutorialCharacter::CancelInteraction()
         IInteractionInterface::Execute_CancelInteract(CurrentInteractable);
         IsInteracting = false;
         SetRepairingGenerator(false);
+        GeneratorRepairSyncAccumulator = 0.f;
+        if (Generator)
+        {
+            const int32 CancelledGeneratorIndex = FMath::Clamp(Generator->GetGeneratorId(), 0, 2);
+            GeneratorRepairProgressValues[CancelledGeneratorIndex] = 0.f;
+        }
+        UpdateGeneratorRepairWidget(nullptr);
 
         if (Generator)
         {
@@ -565,6 +615,145 @@ void ATutorialCharacter::SetRepairingGenerator(bool bRepairing)
     {
         RestoreBodyAnimClass();
     }
+}
+
+void ATutorialCharacter::ShowGeneratorRepairWidget(AGenerator* Generator)
+{
+    if (!IsPlayerControlled() || !IsLocallyControlled() || !GEngine || !GEngine->GameViewport)
+    {
+        return;
+    }
+
+    if (!GeneratorRepairBackgroundTexture)
+    {
+        GeneratorRepairBackgroundTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/1_Map/UI1.UI1"));
+    }
+
+    if (!GeneratorRepairFillMaterial)
+    {
+        GeneratorRepairFillMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/1_Map/C_Progressbar.C_Progressbar"));
+    }
+
+    GeneratorRepairBackgroundBrush = FSlateBrush();
+    GeneratorRepairBackgroundBrush.SetResourceObject(GeneratorRepairBackgroundTexture);
+    GeneratorRepairBackgroundBrush.ImageSize = FVector2D(372.f, 425.f);
+    GeneratorRepairBackgroundBrush.DrawAs = ESlateBrushDrawType::Image;
+
+    if (GeneratorRepairFillMaterial && !GeneratorRepairFillMID1)
+    {
+        GeneratorRepairFillMID1 = UMaterialInstanceDynamic::Create(GeneratorRepairFillMaterial, this);
+        GeneratorRepairFillMID2 = UMaterialInstanceDynamic::Create(GeneratorRepairFillMaterial, this);
+        GeneratorRepairFillMID3 = UMaterialInstanceDynamic::Create(GeneratorRepairFillMaterial, this);
+    }
+
+    GeneratorRepairFillBrush1 = FSlateBrush();
+    GeneratorRepairFillBrush1.SetResourceObject(GeneratorRepairFillMID1);
+    GeneratorRepairFillBrush1.ImageSize = FVector2D(48.f, 48.f);
+    GeneratorRepairFillBrush1.DrawAs = ESlateBrushDrawType::Image;
+
+    GeneratorRepairFillBrush2 = FSlateBrush();
+    GeneratorRepairFillBrush2.SetResourceObject(GeneratorRepairFillMID2);
+    GeneratorRepairFillBrush2.ImageSize = FVector2D(48.f, 48.f);
+    GeneratorRepairFillBrush2.DrawAs = ESlateBrushDrawType::Image;
+
+    GeneratorRepairFillBrush3 = FSlateBrush();
+    GeneratorRepairFillBrush3.SetResourceObject(GeneratorRepairFillMID3);
+    GeneratorRepairFillBrush3.ImageSize = FVector2D(48.f, 48.f);
+    GeneratorRepairFillBrush3.DrawAs = ESlateBrushDrawType::Image;
+
+    if (!GeneratorRepairWidget.IsValid())
+    {
+        SAssignNew(GeneratorRepairWidget, SConstraintCanvas)
+            + SConstraintCanvas::Slot()
+            .Anchors(FAnchors(0.f, 0.5f))
+            .Alignment(FVector2D(0.f, 0.5f))
+            .Offset(FMargin(24.f, 0.f, 372.f, 425.f))
+            .AutoSize(true)
+            [
+                SNew(SBox)
+                .WidthOverride(372.f)
+                .HeightOverride(425.f)
+                [
+                    SNew(SOverlay)
+                    + SOverlay::Slot()
+                    .ZOrder(0)
+                    [
+                        SNew(SImage)
+                        .Image(&GeneratorRepairBackgroundBrush)
+                    ]
+                    + SOverlay::Slot()
+                    .ZOrder(10)
+                    [
+                        SNew(SConstraintCanvas)
+                        + SConstraintCanvas::Slot()
+                        .Offset(FMargin(300.f, 139.f, 48.f, 48.f))
+                        [
+                            SAssignNew(GeneratorRepairProgressImage1, SImage)
+                            .Image(&GeneratorRepairFillBrush1)
+                        ]
+                        + SConstraintCanvas::Slot()
+                        .Offset(FMargin(300.f, 264.f, 48.f, 48.f))
+                        [
+                            SAssignNew(GeneratorRepairProgressImage2, SImage)
+                            .Image(&GeneratorRepairFillBrush2)
+                        ]
+                        + SConstraintCanvas::Slot()
+                        .Offset(FMargin(300.f, 373.f, 48.f, 48.f))
+                        [
+                            SAssignNew(GeneratorRepairProgressImage3, SImage)
+                            .Image(&GeneratorRepairFillBrush3)
+                        ]
+                    ]
+                ]
+            ];
+
+        GEngine->GameViewport->AddViewportWidgetContent(GeneratorRepairWidget.ToSharedRef(), 60);
+    }
+
+    UpdateGeneratorRepairWidget(Generator);
+}
+
+void ATutorialCharacter::UpdateGeneratorRepairWidget(AGenerator* Generator)
+{
+    if (!GeneratorRepairWidget.IsValid())
+    {
+        return;
+    }
+
+    if (Generator)
+    {
+        const int32 ActiveGeneratorIndex = FMath::Clamp(Generator->GetGeneratorId(), 0, 2);
+        GeneratorRepairProgressValues[ActiveGeneratorIndex] = FMath::Clamp(Generator->GetRepairProgress(), 0.f, 1.f);
+    }
+
+    if (GeneratorRepairFillMID1)
+    {
+        GeneratorRepairFillMID1->SetScalarParameterValue(TEXT("Progress"), GeneratorRepairProgressValues[0]);
+    }
+
+    if (GeneratorRepairFillMID2)
+    {
+        GeneratorRepairFillMID2->SetScalarParameterValue(TEXT("Progress"), GeneratorRepairProgressValues[1]);
+    }
+
+    if (GeneratorRepairFillMID3)
+    {
+        GeneratorRepairFillMID3->SetScalarParameterValue(TEXT("Progress"), GeneratorRepairProgressValues[2]);
+    }
+}
+
+void ATutorialCharacter::HideGeneratorRepairWidget()
+{
+    if (GeneratorRepairWidget.IsValid() && GEngine && GEngine->GameViewport)
+    {
+        GEngine->GameViewport->RemoveViewportWidgetContent(GeneratorRepairWidget.ToSharedRef());
+    }
+
+    GeneratorRepairWidget.Reset();
+    GeneratorRepairProgressImage1.Reset();
+    GeneratorRepairProgressImage2.Reset();
+    GeneratorRepairProgressImage3.Reset();
+    GeneratorRepairText.Reset();
 }
 void ATutorialCharacter::SendGeneratorActionToServer(uint8 ActionType, AGenerator* Generator)
 {
@@ -657,15 +846,18 @@ void ATutorialCharacter::ApplyGeneratorNetworkAction(uint8 ActionType, int32 Gen
     if (ActionType == ACTION_GENERATOR_START)
     {
         Generator->ApplyNetworkRepairState(true, false, RepairProgress);
+        UpdateGeneratorRepairWidget(Generator);
     }
     else if (ActionType == ACTION_GENERATOR_CANCEL)
     {
         Generator->ApplyNetworkRepairState(false, false, RepairProgress);
+        UpdateGeneratorRepairWidget(Generator);
     }
     else if (ActionType == ACTION_GENERATOR_COMPLETE)
     {
         const bool bWasRepaired = Generator->bIsRepaired;
         Generator->ApplyNetworkRepairState(false, true, 1.f);
+        UpdateGeneratorRepairWidget(Generator);
         if (!bWasRepaired)
         {
             ShowGeneratorRepairCount();

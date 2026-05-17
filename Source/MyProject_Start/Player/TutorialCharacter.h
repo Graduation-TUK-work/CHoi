@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Styling/SlateBrush.h"
+#include "Styling/SlateTypes.h"
 #include "GameFramework/Character.h"
 #include "MotionWarpingComponent.h"
 #include "MyProject_Start/InteractionInterface.h"
@@ -11,6 +13,12 @@ class FNetworkWorker;
 class AKillerCharacter;
 class AGenerator;
 class UAnimSequence;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UTexture2D;
+class SProgressBar;
+class SImage;
+class STextBlock;
 
 UCLASS() // UCLASS와 class ATutorialCharacter 사이에는 아무것도 없어야 합니다.
 class MYPROJECT_START_API ATutorialCharacter : public ACharacter, public IInteractionInterface
@@ -159,10 +167,41 @@ protected:
 
 private:
 	void ShowGeneratorRepairCount() const;
+	void ShowGeneratorRepairWidget(AGenerator* Generator);
+	void UpdateGeneratorRepairWidget(AGenerator* Generator);
+	void HideGeneratorRepairWidget();
 	AGenerator* FindGeneratorForNetworkAction(int32 GeneratorId, const FVector& Location) const;
 	void ApplyGeneratorNetworkAction(uint8 ActionType, int32 GeneratorId, const FVector& Location, float RepairProgress);
 	void ApplyHitReaction(bool bRespectCooldown);
 	void PlayTemporaryBodyAnimation(UAnimSequence* Animation);
 	void PlayLoopBodyAnimation(UAnimSequence* Animation);
 	void RestoreBodyAnimClass();
+	TSharedPtr<SWidget> GeneratorRepairWidget;
+	TSharedPtr<SImage> GeneratorRepairProgressImage1;
+	TSharedPtr<SImage> GeneratorRepairProgressImage2;
+	TSharedPtr<SImage> GeneratorRepairProgressImage3;
+	TSharedPtr<STextBlock> GeneratorRepairText;
+	FSlateBrush GeneratorRepairBackgroundBrush;
+	FSlateBrush GeneratorRepairFillBrush;
+	FSlateBrush GeneratorRepairFillBrush1;
+	FSlateBrush GeneratorRepairFillBrush2;
+	FSlateBrush GeneratorRepairFillBrush3;
+	FProgressBarStyle GeneratorRepairProgressBarStyle;
+	float GeneratorRepairProgressValues[3] = { 0.f, 0.f, 0.f };
+	float GeneratorRepairSyncAccumulator = 0.f;
+
+	UPROPERTY(Transient)
+	UTexture2D* GeneratorRepairBackgroundTexture = nullptr;
+
+	UPROPERTY(Transient)
+	UMaterialInterface* GeneratorRepairFillMaterial = nullptr;
+
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* GeneratorRepairFillMID1 = nullptr;
+
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* GeneratorRepairFillMID2 = nullptr;
+
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* GeneratorRepairFillMID3 = nullptr;
 };

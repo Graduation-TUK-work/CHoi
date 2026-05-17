@@ -59,11 +59,6 @@ void AGenerator::UpdateInteract_Implementation(float DeltaTime)
         return;
     }
 
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(1, DeltaTime, FColor::Cyan,
-            FString::Printf(TEXT("Repair Progress: %.2f %%"), RepairProgress * 100.f));
-    }
 }
 
 void AGenerator::CompleteInteract_Implementation()

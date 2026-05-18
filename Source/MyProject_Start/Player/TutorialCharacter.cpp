@@ -9,28 +9,30 @@
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimInstance.h"
 #include "UObject/ConstructorHelpers.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "MyProject_Start/InteractionInterface.h"
-#include "MyProject_Start/NetworkWorker.h"
 #include "MyProject_Start/MyGameInstance.h"
-#include "MyProject_Start/LobbyRoleSelectWidget.h" // ï¿½ß°ï¿½
+#include "MyProject_Start/NetworkWorker.h" // ? ìŒ©ê³¤ì˜™
 #include "MyProject_Start/KillerCharacter.h"
+#include "MyProject_Start/BandagePickup.h"
 #include "MyProject_Start/Generator.h"
-#include "Networking.h"    // ï¿½ß°ï¿½
-#include "Sockets.h"       // ï¿½ß°ï¿½
+#include "MyProject_Start/ParkourInteractable.h"
+#include "Networking.h"    // ? ìŒ©ê³¤ì˜™
+#include "Sockets.h"       // ? ìŒ©ê³¤ì˜™
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Styling/SlateBrush.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SConstraintCanvas.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Notifications/SProgressBar.h"
+#include "Widgets/Layout/SConstraintCanvas.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -39,9 +41,10 @@ ATutorialCharacter::ATutorialCharacter()
     bCanVault = false;
     PrimaryActorTick.bCanEverTick = true;
 
-    // Ä«ï¿½Ş¶ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+    // ì¹´å ?¨ë°??? ì™??? ì™?™å ?™ì˜™? ì™?™å ?™ì˜™ ? ì™?™å ?™ì˜™
     SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SPRINGARM"));
     Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("CAMERA"));
+    MotionWarping = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 
     SpringArm->SetupAttachment(GetCapsuleComponent());
     Camera->SetupAttachment(SpringArm);
@@ -53,7 +56,7 @@ ATutorialCharacter::ATutorialCharacter()
     );
     SpringArm->bUsePawnControlRotation = true;
 
-    // ï¿½Ş½ï¿½ ï¿½ï¿½Ä¡ ï¿½ï¿½ È¸ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+    // ? ìŒ¨?™ì˜™ ? ì™?™ì¹˜ ? ì™???Œå ?™ì˜™ ? ì™?™å ?™ì˜™
     GetMesh()->SetRelativeLocationAndRotation(
         FVector(0.f, 0.f, -88.f),
         FRotator(0.f, -90.f, 0.f)
@@ -68,20 +71,20 @@ ATutorialCharacter::ATutorialCharacter()
     }
 
 
-    static ConstructorHelpers::FObjectFinder<UAnimMontage> HitMontageAsset(
-        TEXT("/Script/Engine.AnimMontage'/Game/Animation/player/AM_Big_Kidney_Hit.AM_Big_Kidney_Hit'")
+    static ConstructorHelpers::FObjectFinder<UAnimMontage> NewHitMontageAsset(
+        TEXT("/Script/Engine.AnimMontage'/Game/Animation/player/AM_Hit_On_The_Back_Montag.AM_Hit_On_The_Back_Montag'")
     );
-    if (HitMontageAsset.Succeeded())
+    if (NewHitMontageAsset.Succeeded())
     {
-        HitMontage = HitMontageAsset.Object;
+        HitMontage = NewHitMontageAsset.Object;
     }
 
-    static ConstructorHelpers::FObjectFinder<UAnimMontage> DownedMontageAsset(
-        TEXT("/Script/Engine.AnimMontage'/Game/Animation/player/AM_Fallen_Idle.AM_Fallen_Idle'")
+    static ConstructorHelpers::FObjectFinder<UAnimMontage> NewDownedMontageAsset(
+        TEXT("/Script/Engine.AnimMontage'/Game/Animation/player/AM_Player_Dying_Anim.AM_Player_Dying_Anim'")
     );
-    if (DownedMontageAsset.Succeeded())
+    if (NewDownedMontageAsset.Succeeded())
     {
-        DownedMontage = DownedMontageAsset.Object;
+        DownedMontage = NewDownedMontageAsset.Object;
     }
 
     static ConstructorHelpers::FObjectFinder<UAnimSequence> HitReactionAnimationAsset(
@@ -108,7 +111,15 @@ ATutorialCharacter::ATutorialCharacter()
     {
         RepairAnimation = RepairAnimationAsset.Object;
     }
-    // ï¿½Ìµï¿½ ï¿½ï¿½ï¿½ï¿½
+
+    static ConstructorHelpers::FObjectFinder<UAnimMontage> RepairMontageAsset(
+        TEXT("/Script/Engine.AnimMontage'/Game/Animation/player/AM_Repair.AM_Repair'")
+    );
+    if (RepairMontageAsset.Succeeded())
+    {
+        RepairMontage = RepairMontageAsset.Object;
+    }
+    // ? ì‹±?¸ì˜™ ? ì™?™å ?™ì˜™
     bUseControllerRotationYaw = false;
 
     GetCharacterMovement()->bOrientRotationToMovement = true;
@@ -120,6 +131,8 @@ ATutorialCharacter::ATutorialCharacter()
     GetCharacterMovement()->BrakingDecelerationWalking = 2048.0f;
     GetCharacterMovement()->GroundFriction = 8.0f;
     GetCharacterMovement()->AirControl = 0.2f;
+
+    GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
     // ------------------------------------
 
@@ -140,62 +153,52 @@ void ATutorialCharacter::BeginPlay()
 
     if (IsPlayerControlled() && IsLocallyControlled())
     {
+        ApplyLocalPlayerInputMode();
         RemotePlayers.Empty();
-    }
-
-    // Role selection fallback: if this gameplay pawn appears before choosing a role,
-    // show the lobby UI immediately and avoid connecting to the server yet.
-    if (IsPlayerControlled() && IsLocallyControlled())
-    {
-        UMyGameInstance* GI = GetGameInstance<UMyGameInstance>();
-        if (!GI || GI->LocalSelectedRole == ROLE_NONE)
-        {
-            if (APlayerController* PC = Cast<APlayerController>(GetController()))
-            {
-                PC->bShowMouseCursor = true;
-                FInputModeUIOnly InputMode;
-                PC->SetInputMode(InputMode);
-
-                ULobbyRoleSelectWidget* LobbyWidget = CreateWidget<ULobbyRoleSelectWidget>(PC, ULobbyRoleSelectWidget::StaticClass());
-                if (LobbyWidget)
-                {
-                    LobbyWidget->AddToViewport(100);
-                }
-            }
-            return;
-        }
-    }
-    if (IsPlayerControlled() && IsLocallyControlled())
-    {
         ShowGeneratorRepairWidget(nullptr);
+    }
 
-        FString ServerIP = FNetworkWorker::GetDefaultServerIP();
+    if (IsPlayerControlled() && IsLocallyControlled())
+    {
+        FString ServerIP;
         if (UMyGameInstance* GI = GetGameInstance<UMyGameInstance>())
         {
-            ServerIP = GI->GetServerIP();
+            if (GI->HasValidatedServerConnection())
+            {
+                ServerIP = GI->GetServerIP();
+            }
+        }
+
+        if (ServerIP.IsEmpty())
+        {
+            UE_LOG(LogTemp, Error, TEXT("Skipping survivor network connect because no validated server IP was provided."));
+            return;
         }
 
         NetworkWorker = new FNetworkWorker(ServerIP, FNetworkWorker::GetDefaultServerPort());
         NetworkWorker->SetOwnerCharacter(this);
-        if (UMyGameInstance* GI = GetGameInstance<UMyGameInstance>())
-        {
-            NetworkWorker->SetSelectedRole(GI->LocalSelectedRole);
-        }
         FRunnableThread::Create(NetworkWorker, TEXT("NetworkThread"));
     }
 }
 
+void ATutorialCharacter::PossessedBy(AController* NewController)
+{
+    Super::PossessedBy(NewController);
+    ApplyLocalPlayerInputMode();
+}
+
 void ATutorialCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½å¸¦ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½
+    // ? ì™?™å ?™ì˜™ ? ì™?™å ?™ì˜™ ? ì™??? ì™?™å ?™ì˜™? ì²ë¥?? ì™?™å ?™ì˜™? ì‹¹ê³¤ì˜™ ? ì™?™å ?™ì˜™
     if (NetworkWorker)
     {
         NetworkWorker->Stop();
-        // ï¿½Ş¸ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ò¸ï¿½ï¿½Ú¿ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½ï¿½ï¿½
+        // ? ìŒ¨ëªŒì˜™ ? ì™?™å ?™ì˜™? ì™??? ì?ëªŒì˜™? ìŒ˜?¸ì˜™? ì™??ì²˜å ?™ì˜™? ì™??
     }
 
     HideGeneratorRepairWidget();
 
+    HideReviveProgressWidget();
     Super::EndPlay(EndPlayReason);
     RemotePlayers.Empty();
     RemoteKillers.Empty();
@@ -228,15 +231,22 @@ void ATutorialCharacter::Tick(float DeltaTime)
     if (IsInteracting && CurrentInteractable)
     {
         AGenerator* Generator = Cast<AGenerator>(CurrentInteractable);
+        ATutorialCharacter* DownedSurvivor = Cast<ATutorialCharacter>(CurrentInteractable);
         if (Generator && Generator->bIsRepaired)
         {
             CancelInteraction();
             return;
         }
 
-        const bool bWasGeneratorRepaired = Generator && Generator->bIsRepaired;
+        if (DownedSurvivor && (!DownedSurvivor->IsDowned || DownedSurvivor->IsBeingCarried))
+        {
+            StopInteractingWithCurrentTarget(true);
+            return;
+        }
 
-        // ?˜ë¦¬ê°€ ???ë‚¬???Œë§Œ ?…ë°?´íŠ¸ ?¤í–‰
+        const bool bWasGeneratorRepaired = Generator && Generator->bIsRepaired;
+        const bool bWasDowned = DownedSurvivor && DownedSurvivor->IsDowned;
+
         IInteractionInterface::Execute_UpdateInteract(CurrentInteractable, DeltaTime);
 
         if (Generator)
@@ -246,8 +256,18 @@ void ATutorialCharacter::Tick(float DeltaTime)
             GeneratorRepairSyncAccumulator += DeltaTime;
             if (GeneratorRepairSyncAccumulator >= 0.15f)
             {
-                GeneratorRepairSyncAccumulator = 0.f;
+                GeneratorRepairSyncAccumulator = 0.0f;
                 SendGeneratorActionToServer(ACTION_GENERATOR_START, Generator);
+            }
+        }
+
+        if (DownedSurvivor && bWasDowned)
+        {
+            ReviveSyncAccumulator += DeltaTime;
+            if (ReviveSyncAccumulator >= 0.15f)
+            {
+                ReviveSyncAccumulator = 0.0f;
+                SendSurvivorActionToServer(DownedSurvivor == this ? ACTION_SELF_REVIVE_START : ACTION_SURVIVOR_REVIVE_START, DownedSurvivor);
             }
         }
 
@@ -255,10 +275,24 @@ void ATutorialCharacter::Tick(float DeltaTime)
         {
             SendGeneratorActionToServer(ACTION_GENERATOR_COMPLETE, Generator);
             SetRepairingGenerator(false);
-            GeneratorRepairSyncAccumulator = 0.f;
+            GeneratorRepairSyncAccumulator = 0.0f;
             UpdateGeneratorRepairWidget(Generator);
             ShowGeneratorRepairCount();
             IsInteracting = false;
+        }
+        else if (DownedSurvivor && bWasDowned && !DownedSurvivor->IsDowned)
+        {
+            if (DownedSurvivor == this)
+            {
+                bHasBandage = false;
+                SendSurvivorActionToServer(ACTION_SELF_REVIVE_COMPLETE, DownedSurvivor);
+            }
+            else
+            {
+                SendSurvivorActionToServer(ACTION_SURVIVOR_REVIVE_COMPLETE, DownedSurvivor);
+            }
+
+            StopInteractingWithCurrentTarget(true);
         }
     }
 
@@ -293,22 +327,25 @@ void ATutorialCharacter::SendLocationToServer()
         MovePkt.Data.PlayerId = MyPlayerId;
         MovePkt.Data.CharacterType = CHARACTER_SURVIVOR;
 
-        // 1. ?„ì¹˜ ë°??Œì „ ?¸íŒ…
+        // 1. ?ê¾©íŠ‚ è«????Ÿ¾ ?ëª…ë˜¿
         FVector CurLocation = GetActorLocation();
         MovePkt.Data.X = CurLocation.X;
         MovePkt.Data.Y = CurLocation.Y;
         MovePkt.Data.Z = CurLocation.Z;
         MovePkt.Data.RotationYaw = GetActorRotation().Yaw;
 
-        // 2. [?˜ì •??ë¶€ë¶? ë³µì¡???ë„ ê³„ì‚°??ì§€?°ê³ , ?…ë ¥ê°’ì„ ê·¸ë?ë¡??£ìŠµ?ˆë‹¤!
+        // 2. [??ì ™???ºÂ€?? è¹‚ë“­?????¾ë£„ ?¨ê¾©ê¶??ï§Â€?ê³Œí€? ??…ì °åª›ë???æ´¹ëªƒ?æ¿??ï½Œë’¿??ˆë–!
         MovePkt.Data.ForwardValue = MoveForwardValue;
         MovePkt.Data.RightValue = MoveRightValue;
 
-        // 3. ?¬ë¦¬ê¸??íƒœ ?¸íŒ… (ê¸°ì¡´ ì½”ë“œ ? ì?)
+        // 3. ???æ¹²??ê³¹ê¹­ ?ëª…ë˜¿ (æ¹²ê³—???„ë¶¾ë±??ì¢?)
         MovePkt.Data.bIsSprinting = (GetCharacterMovement()->MaxWalkSpeed > 350.0f);
+        MovePkt.Data.CurrentHealth = CurrentHealth;
+        MovePkt.Data.bIsDowned = IsDowned;
+        MovePkt.Data.bIsBeingCarried = IsBeingCarried;
 
 
-        // 4. ?œë²„ë¡??„ì†¡
+        // 4. ??•ì¾­æ¿??ê¾©ë„š
         int32 BytesSent = 0;
         NetworkWorker->GetSocket()->Send((uint8*)&MovePkt, sizeof(FPacketMove), BytesSent);
     }
@@ -358,13 +395,13 @@ void ATutorialCharacter::MoveRight(float Value)
 
 void ATutorialCharacter::BeginSprint()
 {
-    // ï¿½ï¿½ï¿½ï¿½ 1000ï¿½ï¿½ï¿½ï¿½ 150 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ 850 ï¿½ï¿½ï¿½ï¿½
+    // ? ì™?™å ?™ì˜™ 1000? ì™?™å ?™ì˜™ 150 ? ì™?™å ?™ì˜™? ì™??850 ? ì™?™å ?™ì˜™
     GetCharacterMovement()->MaxWalkSpeed = 350.0f;
 }
 
 void ATutorialCharacter::EndSprint()
 {
-    // ï¿½ï¿½ï¿½ï¿½ 600ï¿½ï¿½ï¿½ï¿½ 150 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ 450 ï¿½ï¿½ï¿½ï¿½
+    // ? ì™?™å ?™ì˜™ 600? ì™?™å ?™ì˜™ 150 ? ì™?™å ?™ì˜™? ì™??450 ? ì™?™å ?™ì˜™
     GetCharacterMovement()->MaxWalkSpeed = 350.0f;
 }
 
@@ -377,7 +414,7 @@ void ATutorialCharacter::EndCrouch() { UnCrouch(); }
 
 void ATutorialCharacter::TryVault()
 {
-    if (bIsVaulting) return;
+    if (!CanStartVault()) return;
 
     FVector Start = GetActorLocation() + FVector(0, 0, 10);
     FVector End = Start + GetActorForwardVector() * 150;
@@ -405,14 +442,72 @@ void ATutorialCharacter::TryVault()
 
         if (!bTopBlocked)
         {
-            bIsVaulting = true;
-            MotionWarping->AddOrUpdateWarpTargetFromLocation(FName("VaultTarget"), TargetLocation);
-            if (VaultMontage)
-            {
-                PlayAnimMontage(VaultMontage);
-            }
+            BeginVaultToLocation(TargetLocation);
         }
     }
+}
+
+bool ATutorialCharacter::CanStartVault() const
+{
+    return !bIsVaulting && !IsDowned && !IsBeingCarried;
+}
+
+void ATutorialCharacter::StartVaultFromInteractable(AParkourInteractable* ParkourInteractable)
+{
+    if (!CanStartVault() || !ParkourInteractable)
+    {
+        return;
+    }
+
+    if (!MotionWarping)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Parkour failed: MotionWarping component is missing."));
+        return;
+    }
+
+    if (!VaultMontage)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Parkour failed: VaultMontage is not assigned."));
+        return;
+    }
+
+    BeginVaultToLocation(ParkourInteractable->GetVaultTargetLocation());
+}
+
+void ATutorialCharacter::BeginVaultToLocation(const FVector& TargetLocation)
+{
+    if (!MotionWarping || !VaultMontage)
+    {
+        return;
+    }
+
+    VaultTargetLocation = TargetLocation;
+    bIsVaulting = true;
+    VaultAlpha = 0.0f;
+    bIsVaultMoving = true;
+
+    GetCharacterMovement()->StopMovementImmediately();
+    MotionWarping->AddOrUpdateWarpTargetFromLocation(FName("VaultTarget"), VaultTargetLocation);
+
+    const float PlayedLength = PlayAnimMontage(VaultMontage);
+    const float VaultDuration = PlayedLength > 0.0f ? PlayedLength : 0.8f;
+
+    GetWorldTimerManager().ClearTimer(VaultFinishTimerHandle);
+    GetWorldTimerManager().SetTimer(
+        VaultFinishTimerHandle,
+        this,
+        &ATutorialCharacter::FinishVault,
+        VaultDuration,
+        false
+    );
+}
+
+void ATutorialCharacter::FinishVault()
+{
+    SetActorLocation(VaultTargetLocation, false, nullptr, ETeleportType::TeleportPhysics);
+    bIsVaultMoving = false;
+    bIsVaulting = false;
+    VaultAlpha = 0.0f;
 }
 
 void ATutorialCharacter::TraceForInteractable()
@@ -423,15 +518,15 @@ void ATutorialCharacter::TraceForInteractable()
     FVector StartLocation = Camera->GetComponentLocation();
     FVector ForwardVector = Camera->GetForwardVector();
 
-    // ?¤ì œ ì¡°ì???ìµœì ?”ëœ ?¬ê±°ë¦¬ì? ?œì‘ ì§€??
+    // ??¼ì £ è­°ê³—???ï§¤ì’–??ë¶¾ë§‚ ??êµ…ç”±?? ??–ì˜‰ ï§Â€??
     FVector TraceStart = StartLocation;
     FVector TraceEnd = TraceStart + (ForwardVector * 1500.f);
 
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(this);
 
-    // ?ì • ë²”ìœ„ë¥??‰ë„‰?˜ê²Œ ?˜ì—¬ ?„ì›Œ?ˆëŠ” ?€?ë„ ???¡íˆ?„ë¡ ? ì? (ë°˜ì?ë¦?40cm)
-    FCollisionShape SphereShape = FCollisionShape::MakeSphere(40.f);
+    // ?ë¨? ™ è¸°ë¶¿?ç‘œ???°ê¼®??ì¾¶ ??ë¿¬ ?ê¾©ì™??ˆë’— ???ê³·ë£„ ????«ì—³?ê¾¨ì¤‰ ?ì¢? (è«›ì„???40cm)
+    FCollisionShape SphereShape = FCollisionShape::MakeSphere(90.f);
 
     TArray<FHitResult> Hits;
     GetWorld()->SweepMultiByChannel(
@@ -466,6 +561,54 @@ void ATutorialCharacter::TraceForInteractable()
             NewInteractable = HitActor;
             break;
         }
+    }
+
+    if (!NewInteractable)
+    {
+        TArray<AActor*> FoundSurvivors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ATutorialCharacter::StaticClass(), FoundSurvivors);
+
+        const FVector SearchOrigin = Camera->GetComponentLocation();
+        const FVector SearchForward = Camera->GetForwardVector().GetSafeNormal();
+        constexpr float MaxReviveInteractDistance = 500.f;
+        constexpr float MinReviveFacingDot = -0.15f;
+
+        ATutorialCharacter* BestDownedSurvivor = nullptr;
+        float BestScore = TNumericLimits<float>::Max();
+
+        for (AActor* Actor : FoundSurvivors)
+        {
+            ATutorialCharacter* Survivor = Cast<ATutorialCharacter>(Actor);
+            if (!IsValid(Survivor) || Survivor == this || !Survivor->IsDowned || Survivor->IsBeingCarried)
+            {
+                continue;
+            }
+
+            FVector SurvivorTargetLocation = Survivor->GetActorLocation();
+            SurvivorTargetLocation.Z += 50.0f;
+
+            const FVector ToSurvivor = SurvivorTargetLocation - SearchOrigin;
+            const float Distance = ToSurvivor.Size();
+            if (Distance > MaxReviveInteractDistance)
+            {
+                continue;
+            }
+
+            const float FacingDot = FVector::DotProduct(SearchForward, ToSurvivor.GetSafeNormal());
+            if (FacingDot < MinReviveFacingDot)
+            {
+                continue;
+            }
+
+            const float Score = Distance - (FacingDot * 250.f);
+            if (Score < BestScore)
+            {
+                BestScore = Score;
+                BestDownedSurvivor = Survivor;
+            }
+        }
+
+        NewInteractable = BestDownedSurvivor;
     }
 
     if (!NewInteractable)
@@ -512,25 +655,27 @@ void ATutorialCharacter::TraceForInteractable()
 
         NewInteractable = BestGenerator;
     }
-    // ?í˜¸?‘ìš© ?€?ì´ ë°”ë€Œì—ˆ???Œì˜ ì²˜ë¦¬
+    // ?ê³¹ìƒ‡?ë¬’ìŠœ ???ê³¸ì”  è«›ë¶¾?????????“½ ï§£ì„??
     if (CurrentInteractable != NewInteractable)
     {
         if (IsInteracting && CurrentInteractable)
         {
             AGenerator* Generator = Cast<AGenerator>(CurrentInteractable);
+            ATutorialCharacter* DownedSurvivor = Cast<ATutorialCharacter>(CurrentInteractable);
             IInteractionInterface::Execute_CancelInteract(CurrentInteractable);
             IsInteracting = false;
             SetRepairingGenerator(false);
-            if (Generator)
-        {
-            const int32 CancelledGeneratorIndex = FMath::Clamp(Generator->GetGeneratorId(), 0, 2);
-            GeneratorRepairProgressValues[CancelledGeneratorIndex] = 0.f;
-        }
-        UpdateGeneratorRepairWidget(nullptr);
+            SetRevivingSurvivor(false);
+            GeneratorRepairSyncAccumulator = 0.0f;
+            UpdateGeneratorRepairWidget(Generator);
 
             if (Generator)
             {
                 SendGeneratorActionToServer(ACTION_GENERATOR_CANCEL, Generator);
+            }
+            else if (DownedSurvivor)
+            {
+                SendSurvivorActionToServer(ACTION_SURVIVOR_REVIVE_CANCEL, DownedSurvivor);
             }
         }
         CurrentInteractable = NewInteractable;
@@ -539,6 +684,27 @@ void ATutorialCharacter::TraceForInteractable()
 
 void ATutorialCharacter::StartInteraction()
 {
+    if (IsBeingCarried)
+    {
+        return;
+    }
+
+    if (IsDowned)
+    {
+        if (!bHasBandage)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Self revive requires a bandage."));
+            return;
+        }
+
+        CurrentInteractable = this;
+        IInteractionInterface::Execute_StartInteract(this, this);
+        IsInteracting = true;
+        ReviveSyncAccumulator = 0.0f;
+        SendSurvivorActionToServer(ACTION_SELF_REVIVE_START, this);
+        return;
+    }
+
     TraceForInteractable();
 
     if (!CurrentInteractable)
@@ -549,13 +715,32 @@ void ATutorialCharacter::StartInteraction()
 
     if (CurrentInteractable)
     {
-        // [ì¶”ê???ë¡œì§] ?´ë? ?˜ë¦¬??ë°œì „ê¸°ì¸ì§€ ?•ì¸
+        if (ABandagePickup* BandagePickup = Cast<ABandagePickup>(CurrentInteractable))
+        {
+            if (bHasBandage)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("You already have a bandage."));
+                return;
+            }
+
+            IInteractionInterface::Execute_StartInteract(CurrentInteractable, this);
+            SendBandageActionToServer(ACTION_BANDAGE_PICKUP, BandagePickup);
+            CurrentInteractable = nullptr;
+            return;
+        }
+
+        if (AParkourInteractable* ParkourInteractable = Cast<AParkourInteractable>(CurrentInteractable))
+        {
+            StartVaultFromInteractable(ParkourInteractable);
+            return;
+        }
+        // [?°ë¶½???æ¿¡ì’–ì­? ??€? ??â”??è«›ì’–?¾æ¹²ê³—ì”¤ï§Â€ ?ëº¤ì”¤
         if (AGenerator* Generator = Cast<AGenerator>(CurrentInteractable))
         {
             if (Generator->bIsRepaired)
             {
                 UE_LOG(LogTemp, Warning, TEXT("This generator is already done!"));
-                return; // ?¨ìˆ˜ ì¢…ë£Œ
+                return; // ??¥ë‹” ?«ë‚…ì¦?
             }
         }
 
@@ -566,7 +751,14 @@ void ATutorialCharacter::StartInteraction()
         {
             SetRepairingGenerator(true);
             UpdateGeneratorRepairWidget(Generator);
+            GeneratorRepairSyncAccumulator = 0.0f;
             SendGeneratorActionToServer(ACTION_GENERATOR_START, Generator);
+        }
+        else if (ATutorialCharacter* DownedSurvivor = Cast<ATutorialCharacter>(CurrentInteractable))
+        {
+            SetRevivingSurvivor(true);
+            ReviveSyncAccumulator = 0.0f;
+            SendSurvivorActionToServer(ACTION_SURVIVOR_REVIVE_START, DownedSurvivor);
         }
     }
 }
@@ -576,20 +768,21 @@ void ATutorialCharacter::CancelInteraction()
     if (IsInteracting && CurrentInteractable)
     {
         AGenerator* Generator = Cast<AGenerator>(CurrentInteractable);
+        ATutorialCharacter* DownedSurvivor = Cast<ATutorialCharacter>(CurrentInteractable);
         IInteractionInterface::Execute_CancelInteract(CurrentInteractable);
         IsInteracting = false;
         SetRepairingGenerator(false);
-        GeneratorRepairSyncAccumulator = 0.f;
-        if (Generator)
-        {
-            const int32 CancelledGeneratorIndex = FMath::Clamp(Generator->GetGeneratorId(), 0, 2);
-            GeneratorRepairProgressValues[CancelledGeneratorIndex] = 0.f;
-        }
-        UpdateGeneratorRepairWidget(nullptr);
+        SetRevivingSurvivor(false);
+        GeneratorRepairSyncAccumulator = 0.0f;
+        UpdateGeneratorRepairWidget(Generator);
 
         if (Generator)
         {
             SendGeneratorActionToServer(ACTION_GENERATOR_CANCEL, Generator);
+        }
+        else if (DownedSurvivor)
+        {
+            SendSurvivorActionToServer(DownedSurvivor == this ? ACTION_SELF_REVIVE_CANCEL : ACTION_SURVIVOR_REVIVE_CANCEL, DownedSurvivor);
         }
     }
 }
@@ -606,14 +799,110 @@ void ATutorialCharacter::SetRepairingGenerator(bool bRepairing)
 
     if (bIsRepairingGenerator)
     {
-        if (RepairAnimation)
-        {
-            PlayLoopBodyAnimation(RepairAnimation);
-        }
+        PlayRepairMontageStart();
     }
     else
     {
-        RestoreBodyAnimClass();
+        PlayRepairMontageEnd();
+    }
+}
+void ATutorialCharacter::SendGeneratorActionToServer(uint8 ActionType, AGenerator* Generator)
+{
+    if (!Generator || !NetworkWorker || !NetworkWorker->GetSocket() || MyPlayerId == -1) return;
+
+    FPacketAction ActionPkt;
+    ActionPkt.Type = PKT_ACTION;
+    ActionPkt.ActionType = ActionType;
+    ActionPkt.InstigatorId = MyPlayerId;
+    ActionPkt.TargetId = Generator->GetGeneratorId();
+
+    const FVector Loc = Generator->GetActorLocation();
+    ActionPkt.X = Loc.X;
+    ActionPkt.Y = Loc.Y;
+    ActionPkt.Z = Loc.Z;
+    ActionPkt.RotationYaw = Generator->GetRepairProgress();
+
+    int32 BytesSent = 0;
+    NetworkWorker->GetSocket()->Send((uint8*)&ActionPkt, sizeof(FPacketAction), BytesSent);
+}
+
+void ATutorialCharacter::SendBandageActionToServer(uint8 ActionType, ABandagePickup* BandagePickup)
+{
+    if (!BandagePickup || !NetworkWorker || !NetworkWorker->GetSocket() || MyPlayerId == -1) return;
+
+    FPacketAction ActionPkt;
+    ActionPkt.Type = PKT_ACTION;
+    ActionPkt.ActionType = ActionType;
+    ActionPkt.InstigatorId = MyPlayerId;
+    ActionPkt.TargetId = BandagePickup->GetBandageId();
+
+    const FVector Loc = BandagePickup->GetActorLocation();
+    ActionPkt.X = Loc.X;
+    ActionPkt.Y = Loc.Y;
+    ActionPkt.Z = Loc.Z;
+    ActionPkt.RotationYaw = 0.0f;
+
+    int32 BytesSent = 0;
+    NetworkWorker->GetSocket()->Send((uint8*)&ActionPkt, sizeof(FPacketAction), BytesSent);
+}
+
+void ATutorialCharacter::SendSurvivorActionToServer(uint8 ActionType, ATutorialCharacter* TargetCharacter)
+{
+    if (!TargetCharacter || !NetworkWorker || !NetworkWorker->GetSocket() || MyPlayerId == -1) return;
+
+    FPacketAction ActionPkt;
+    ActionPkt.Type = PKT_ACTION;
+    ActionPkt.ActionType = ActionType;
+    ActionPkt.InstigatorId = MyPlayerId;
+    ActionPkt.TargetId = TargetCharacter->MyPlayerId;
+
+    const FVector Loc = TargetCharacter->GetActorLocation();
+    ActionPkt.X = Loc.X;
+    ActionPkt.Y = Loc.Y;
+    ActionPkt.Z = Loc.Z;
+    if (ActionType == ACTION_SURVIVOR_REVIVE_START || ActionType == ACTION_SURVIVOR_REVIVE_CANCEL || ActionType == ACTION_SURVIVOR_REVIVE_COMPLETE ||
+        ActionType == ACTION_SELF_REVIVE_START || ActionType == ACTION_SELF_REVIVE_CANCEL || ActionType == ACTION_SELF_REVIVE_COMPLETE)
+    {
+        ActionPkt.RotationYaw = FMath::Clamp(TargetCharacter->RecoveryProgress, 0.f, 1.f);
+    }
+    else
+    {
+        ActionPkt.RotationYaw = GetActorRotation().Yaw;
+    }
+
+    int32 BytesSent = 0;
+    NetworkWorker->GetSocket()->Send((uint8*)&ActionPkt, sizeof(FPacketAction), BytesSent);
+}
+
+void ATutorialCharacter::ShowGeneratorRepairCount() const
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    TArray<AActor*> FoundGenerators;
+    UGameplayStatics::GetAllActorsOfClass(World, AGenerator::StaticClass(), FoundGenerators);
+
+    int32 TotalGenerators = 0;
+    int32 RepairedGenerators = 0;
+
+    for (AActor* Actor : FoundGenerators)
+    {
+        AGenerator* Generator = Cast<AGenerator>(Actor);
+        if (!Generator) continue;
+
+        ++TotalGenerators;
+        if (Generator->bIsRepaired)
+        {
+            ++RepairedGenerators;
+        }
+    }
+
+    const FString Message = FString::Printf(TEXT("Generator Repaired: %d/%d"), TotalGenerators, RepairedGenerators);
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(3001, 4.0f, FColor::Yellow, Message);
     }
 }
 
@@ -755,56 +1044,93 @@ void ATutorialCharacter::HideGeneratorRepairWidget()
     GeneratorRepairProgressImage3.Reset();
     GeneratorRepairText.Reset();
 }
-void ATutorialCharacter::SendGeneratorActionToServer(uint8 ActionType, AGenerator* Generator)
+
+void ATutorialCharacter::ShowReviveProgressWidget()
 {
-    if (!Generator || !NetworkWorker || !NetworkWorker->GetSocket() || MyPlayerId == -1) return;
+    if (!IsPlayerControlled() || !IsLocallyControlled() || !GEngine || !GEngine->GameViewport)
+    {
+        return;
+    }
 
-    FPacketAction ActionPkt;
-    ActionPkt.Type = PKT_ACTION;
-    ActionPkt.ActionType = ActionType;
-    ActionPkt.InstigatorId = MyPlayerId;
-    ActionPkt.TargetId = Generator->GetGeneratorId();
+    if (ReviveProgressWidget.IsValid())
+    {
+        return;
+    }
 
-    const FVector Loc = Generator->GetActorLocation();
-    ActionPkt.X = Loc.X;
-    ActionPkt.Y = Loc.Y;
-    ActionPkt.Z = Loc.Z;
-    ActionPkt.RotationYaw = Generator->GetRepairProgress();
+    SAssignNew(ReviveProgressWidget, SConstraintCanvas)
+        + SConstraintCanvas::Slot()
+        .Anchors(FAnchors(0.5f, 0.78f))
+        .Alignment(FVector2D(0.5f, 0.5f))
+        .Offset(FMargin(0.f, 0.f, 380.f, 56.f))
+        .AutoSize(true)
+        [
+            SNew(SBox)
+            .WidthOverride(380.f)
+            .HeightOverride(56.f)
+            [
+                SNew(SBorder)
+                .Padding(FMargin(12.f, 8.f))
+                .BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.72f))
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SAssignNew(ReviveProgressText, STextBlock)
+                        .Text(FText::FromString(TEXT("REVIVE 0%")))
+                        .ColorAndOpacity(FLinearColor::White)
+                        .Justification(ETextJustify::Center)
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(FMargin(0.f, 8.f, 0.f, 0.f))
+                    [
+                        SNew(SBox)
+                        .HeightOverride(18.f)
+                        [
+                            SAssignNew(ReviveProgressBar, SProgressBar)
+                            .Percent(0.f)
+                            .FillColorAndOpacity(FLinearColor(0.1f, 0.78f, 1.f, 1.f))
+                        ]
+                    ]
+                ]
+            ]
+        ];
 
-    int32 BytesSent = 0;
-    NetworkWorker->GetSocket()->Send((uint8*)&ActionPkt, sizeof(FPacketAction), BytesSent);
+    GEngine->GameViewport->AddViewportWidgetContent(ReviveProgressWidget.ToSharedRef(), 100);
 }
 
-void ATutorialCharacter::ShowGeneratorRepairCount() const
+void ATutorialCharacter::UpdateReviveProgressWidget(float Progress)
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    TArray<AActor*> FoundGenerators;
-    UGameplayStatics::GetAllActorsOfClass(World, AGenerator::StaticClass(), FoundGenerators);
-
-    int32 TotalGenerators = 0;
-    int32 RepairedGenerators = 0;
-
-    for (AActor* Actor : FoundGenerators)
+    if (!ReviveProgressWidget.IsValid())
     {
-        AGenerator* Generator = Cast<AGenerator>(Actor);
-        if (!Generator) continue;
-
-        ++TotalGenerators;
-        if (Generator->bIsRepaired)
-        {
-            ++RepairedGenerators;
-        }
+        ShowReviveProgressWidget();
     }
 
-    const FString Message = FString::Printf(TEXT("Generator Repaired: %d/%d"), TotalGenerators, RepairedGenerators);
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+    const float ClampedProgress = FMath::Clamp(Progress, 0.f, 1.f);
 
-    if (GEngine)
+    if (ReviveProgressBar.IsValid())
     {
-        GEngine->AddOnScreenDebugMessage(3001, 4.0f, FColor::Yellow, Message);
+        ReviveProgressBar->SetPercent(ClampedProgress);
     }
+
+    if (ReviveProgressText.IsValid())
+    {
+        const int32 Percent = FMath::RoundToInt(ClampedProgress * 100.f);
+        ReviveProgressText->SetText(FText::FromString(FString::Printf(TEXT("REVIVE %d%%"), Percent)));
+    }
+}
+
+void ATutorialCharacter::HideReviveProgressWidget()
+{
+    if (ReviveProgressWidget.IsValid() && GEngine && GEngine->GameViewport)
+    {
+        GEngine->GameViewport->RemoveViewportWidgetContent(ReviveProgressWidget.ToSharedRef());
+    }
+
+    ReviveProgressWidget.Reset();
+    ReviveProgressBar.Reset();
+    ReviveProgressText.Reset();
 }
 AGenerator* ATutorialCharacter::FindGeneratorForNetworkAction(int32 GeneratorId, const FVector& Location) const
 {
@@ -838,6 +1164,38 @@ AGenerator* ATutorialCharacter::FindGeneratorForNetworkAction(int32 GeneratorId,
     return NearestGenerator;
 }
 
+ABandagePickup* ATutorialCharacter::FindBandageForNetworkAction(int32 BandageId, const FVector& Location) const
+{
+    UWorld* World = GetWorld();
+    if (!World) return nullptr;
+
+    TArray<AActor*> FoundBandages;
+    UGameplayStatics::GetAllActorsOfClass(World, ABandagePickup::StaticClass(), FoundBandages);
+
+    ABandagePickup* NearestBandage = nullptr;
+    float BestDistanceSq = TNumericLimits<float>::Max();
+
+    for (AActor* Actor : FoundBandages)
+    {
+        ABandagePickup* BandagePickup = Cast<ABandagePickup>(Actor);
+        if (!BandagePickup) continue;
+
+        if (BandagePickup->GetBandageId() == BandageId)
+        {
+            return BandagePickup;
+        }
+
+        const float DistanceSq = FVector::DistSquared(BandagePickup->GetActorLocation(), Location);
+        if (DistanceSq < BestDistanceSq)
+        {
+            BestDistanceSq = DistanceSq;
+            NearestBandage = BandagePickup;
+        }
+    }
+
+    return NearestBandage;
+}
+
 void ATutorialCharacter::ApplyGeneratorNetworkAction(uint8 ActionType, int32 GeneratorId, const FVector& Location, float RepairProgress)
 {
     AGenerator* Generator = FindGeneratorForNetworkAction(GeneratorId, Location);
@@ -864,6 +1222,14 @@ void ATutorialCharacter::ApplyGeneratorNetworkAction(uint8 ActionType, int32 Gen
         }
     }
 }
+
+void ATutorialCharacter::ApplyBandageNetworkAction(int32 BandageId, const FVector& Location)
+{
+    ABandagePickup* BandagePickup = FindBandageForNetworkAction(BandageId, Location);
+    if (!BandagePickup) return;
+
+    BandagePickup->ApplyCollectedState();
+}
 void ATutorialCharacter::PlayHitReaction()
 {
     ApplyHitReaction(true);
@@ -876,24 +1242,97 @@ void ATutorialCharacter::PlayNetworkHitReaction()
 
 void ATutorialCharacter::ForceDownedState()
 {
+    if (IsInteracting)
+    {
+        CancelInteraction();
+    }
+
     CurrentHealth = 0;
     IsDowned = true;
+    bIsBeingRevived = false;
+    bIsSelfReviving = false;
+    RecoveryProgress = 0.0f;
+    CurrentReviver = nullptr;
     bCanBeHit = false;
+
+    float DownedMontageLength = 0.0f;
+    if (DownedMontage)
+    {
+        DownedMontageLength = PlayAnimMontage(DownedMontage);
+    }
 
     if (DownedAnimation)
     {
-        PlayLoopBodyAnimation(DownedAnimation);
-    }
-    else if (DownedMontage)
-    {
-        PlayAnimMontage(DownedMontage);
+        if (DownedMontageLength > 0.0f)
+        {
+            FTimerHandle DownedLoopTimer;
+            GetWorldTimerManager().SetTimer(
+                DownedLoopTimer,
+                FTimerDelegate::CreateLambda([this]()
+                    {
+                        if (IsValid(this) && IsDowned && !IsBeingCarried)
+                        {
+                            PlayLoopBodyAnimation(DownedAnimation);
+                        }
+                    }),
+                DownedMontageLength,
+                false
+            );
+        }
+        else
+        {
+            PlayLoopBodyAnimation(DownedAnimation);
+        }
     }
 
     GetCapsuleComponent()->SetCapsuleHalfHeight(30.0f);
     GetCharacterMovement()->DisableMovement();
     bUseControllerRotationYaw = false;
 
-    UE_LOG(LogTemp, Error, TEXT("Survivor is downed."));
+    UE_LOG(LogTemp, Error, TEXT("Survivor entered the downed state."));
+}
+
+void ATutorialCharacter::ForceInjuredState()
+{
+    if (IsInteracting)
+    {
+        CancelInteraction();
+    }
+
+    CurrentHealth = 1;
+    IsDowned = false;
+    IsBeingCarried = false;
+    if (bIsSelfReviving)
+    {
+        UpdateReviveProgressWidget(1.0f);
+        HideReviveProgressWidget();
+    }
+    else if (CurrentReviver.IsValid())
+    {
+        CurrentReviver->UpdateReviveProgressWidget(1.0f);
+        CurrentReviver->HideReviveProgressWidget();
+    }
+
+    bIsBeingRevived = false;
+    bIsSelfReviving = false;
+    RecoveryProgress = 0.0f;
+    CurrentReviver = nullptr;
+    bCanBeHit = true;
+
+    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+    RestoreBodyAnimClass();
+
+    if (DownedMontage)
+    {
+        StopAnimMontage(DownedMontage);
+    }
+
+    GetCapsuleComponent()->SetCapsuleHalfHeight(88.0f);
+    GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    bUseControllerRotationYaw = false;
+
+    UE_LOG(LogTemp, Warning, TEXT("Survivor entered the injured state."));
 }
 void ATutorialCharacter::ApplyHitReaction(bool bRespectCooldown)
 {
@@ -902,24 +1341,24 @@ void ATutorialCharacter::ApplyHitReaction(bool bRespectCooldown)
 
     bCanBeHit = false;
     CurrentHealth--;
-    UE_LOG(LogTemp, Warning, TEXT("Survivor hit. CurrentHealth: %d"), CurrentHealth);
+    UE_LOG(LogTemp, Warning, TEXT("Survivor took damage. Current health: %d"), CurrentHealth);
 
     if (CurrentHealth > 0)
     {
-        if (HitReactionAnimation)
-        {
-            PlayTemporaryBodyAnimation(HitReactionAnimation);
-        }
-        else if (HitMontage)
+        if (HitMontage)
         {
             PlayAnimMontage(HitMontage);
+        }
+        else if (HitReactionAnimation)
+        {
+            PlayTemporaryBodyAnimation(HitReactionAnimation);
         }
 
         FTimerHandle HitCooldownTimer;
         GetWorldTimerManager().SetTimer(HitCooldownTimer, FTimerDelegate::CreateLambda([this]()
             {
                 bCanBeHit = true;
-                UE_LOG(LogTemp, Log, TEXT("ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ù½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½"));
+                UE_LOG(LogTemp, Log, TEXT("? ì™?™å ?™ì˜™? ì™??? ì™?™å ?™ì˜™ ? ìŒ•?™ì˜™ ? ì™?™å ?™ì˜™ ? ì™??? ì™?™å ?™ì˜™"));
             }), 1.0f, false);
     }
     else
@@ -929,19 +1368,19 @@ void ATutorialCharacter::ApplyHitReaction(bool bRespectCooldown)
     }
 }
 
-void ATutorialCharacter::UpdateRemotePlayer(int32 PlayerId, FVector Location, float RotationYaw, float Forward, float Right, bool bSprint)
+void ATutorialCharacter::UpdateRemotePlayer(int32 PlayerId, FVector Location, float RotationYaw, float Forward, float Right, bool bSprint, int32 InHealth, bool bInDowned, bool bInBeingCarried)
 {
     UWorld* World = GetWorld();
     if (!World || World->bIsTearingDown) return;
     if (!IsValid(this)) return;
 
-    // 1. ï¿½Ê¿ï¿½ ï¿½Ø´ï¿½ IDï¿½ï¿½ ï¿½Ö´ï¿½ï¿½ï¿½ È®ï¿½ï¿½
+    // 1. ? ì‹­?¸ì˜™ ? ìŒ”?ì˜™ ID? ì™??? ìŒ?ì˜™? ì™???•å ?™ì˜™
     if (RemotePlayers.Contains(PlayerId))
     {
-        // ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ Ä³ï¿½ï¿½ï¿½Í·ï¿½ ï¿½ï¿½ï¿½ï¿½È¯
+        // ? ì™?™å ?™ì˜™? ì‹¹ê³¤ì˜™ ìºå ?™ì˜™? ì‹¶ë¤„ì˜™ ? ì™?™å ?™ì˜™??
         ATutorialCharacter* Target = Cast<ATutorialCharacter>(RemotePlayers[PlayerId]);
 
-        // [ï¿½ï¿½ï¿½ï¿½] Targetï¿½ï¿½ ï¿½Ş¸ğ¸®¿ï¿½ ï¿½ï¿½ï¿½ï¿½Ö±â¸?ï¿½Ï¸ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ® ï¿½ï¿½ï¿½ï¿½
+        // [? ì™?™å ?™ì˜™] Target? ì™??? ìŒ¨ëª¨ë¦¬?¸ì˜™ ? ì™?™å ?™ì˜™æ®?¶¬?? ì‹¹ëªŒì˜™ ? ì™?™å ?™ì˜™? ì™?™íŠ¸ ? ì™?™å ?™ì˜™
         if (IsValid(Target))
         {
             Target->SetActorLocation(Location);
@@ -950,18 +1389,19 @@ void ATutorialCharacter::UpdateRemotePlayer(int32 PlayerId, FVector Location, fl
             Target->RemoteForwardValue = Forward;
             Target->RemoteRightValue = Right;
             Target->RemoteIsSprinting = bSprint;
+            Target->SyncRemoteState(InHealth, bInDowned, bInBeingCarried);
 
-            // ï¿½ï¿½ï¿½â¼­ ï¿½Ô¼ï¿½ ï¿½ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ®ï¿½ï¿½)
+            // ? ì™?™å ?©ì„œ ? ìŒ‰?½ì˜™ ? ì™?™å ?™ì˜™ (? ì™?™å ?™ì˜™? ì™?™å ?™ì˜™? ì™??? ì™?™å ?™ì˜™? ì™?™íŠ¸? ì™??
             return;
         }
         else
         {
-            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ã·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ù¸ï¿?ï¿½Ê¿ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+            // ? ì™?™å ?™ì˜™? ì™??? ì‹œë¤„ì˜™? ì™??? ì™?™å ?™ì˜™? ì™??? ì™?™å ?™ì˜™? ì™?™æ‘¸??? ì‹­?¸ì˜™? ì™??? ì™?™å ?™ì˜™
             RemotePlayers.Remove(PlayerId);
         }
     }
 
-    // 2. ï¿½Ê¿ï¿½ ï¿½ï¿½ï¿½Å³ï¿½ Targetï¿½ï¿½ ï¿½ï¿½È¿ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ì¿¡ï¿½ï¿?ï¿½ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½â°¡ else ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½)
+    // 2. ? ì‹­?¸ì˜™ ? ì™?™å ? ë†‚??Target? ì™??? ì™?™íš¨? ì™?™å ?™ì˜™ ? ì™?™å ?™ì˜™ ? ì™?™è‘?½ì˜™??? ì™?™å ?™ì˜™ (? ì™?™å ?©ê? else ? ì™?™å ?™ì˜™ ? ì™?™å ?™ì˜™ ? ì™??
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
@@ -972,18 +1412,76 @@ void ATutorialCharacter::UpdateRemotePlayer(int32 PlayerId, FVector Location, fl
         NewPlayer->MyPlayerId = PlayerId;
         NewPlayer->AutoPossessPlayer = EAutoReceiveInput::Disabled;
 
-        // [?˜ì •] NoCollision(ì¶©ëŒ ?†ìŒ)??QueryOnly(?ˆì´?€ ê°ì?ë§?ê°€??ë¡?ë°”ê¿‰?ˆë‹¤.
-        // ?´ë ‡ê²??´ì•¼ ?ˆì´?€(Trace)ê°€ ìºë¦­?°ì˜ ëª¸ì— ë§ìŠµ?ˆë‹¤.
+        // [??ì ™] NoCollision(?°â‘¸ë£???ì“¬)??QueryOnly(??‰ì” ?? åª›ë¨¯?ï§?åª›Â€??æ¿?è«›ë¶½???ˆë–.
+        // ??€?ƒå¯ƒ???ë¹ ??‰ì” ??(Trace)åª›Â€ ï§?¨®??ê³—ì“½ ï§ëª„ë¿?ï§ìš???ˆë–.
         NewPlayer->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
-        // [ì¶”ê?] ?¹ì‹œ ëª¨ë¥´???ˆì´?€ ì±„ë„(Visibility)???•ì‹¤??'Block'?˜ë„ë¡??¤ì •?©ë‹ˆ??
+        // [?°ë¶½?] ?ë±€??ï§â‘¤?????‰ì” ?? ï§?¾¨ê¼?Visibility)???ëº¤ë–??'Block'??ë£„æ¿???¼ì ™??¸ë•²??
         NewPlayer->GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        NewPlayer->SyncRemoteState(InHealth, bInDowned, bInBeingCarried);
 
         NewPlayer->DisableInput(nullptr);
         RemotePlayers.Add(PlayerId, NewPlayer);
         UE_LOG(LogTemp, Warning, TEXT("New Remote Player Spawned! ID: %d"), PlayerId);
     }
 }
+
+void ATutorialCharacter::SyncRemoteState(int32 InHealth, bool bInDowned, bool bInBeingCarried)
+{
+    CurrentHealth = InHealth;
+    IsBeingCarried = bInBeingCarried;
+
+    if (bInDowned)
+    {
+        if (!IsDowned)
+        {
+            ForceDownedState();
+        }
+
+        CurrentHealth = 0;
+        IsBeingCarried = bInBeingCarried;
+        return;
+    }
+
+    if (IsDowned)
+    {
+        if (InHealth <= 1)
+        {
+            ForceInjuredState();
+        }
+        else
+        {
+            IsDowned = false;
+            IsBeingCarried = false;
+            if (bIsSelfReviving)
+    {
+        UpdateReviveProgressWidget(1.0f);
+        HideReviveProgressWidget();
+    }
+    else if (CurrentReviver.IsValid())
+    {
+        CurrentReviver->UpdateReviveProgressWidget(1.0f);
+        CurrentReviver->HideReviveProgressWidget();
+    }
+
+    bIsBeingRevived = false;
+            bIsSelfReviving = false;
+            RecoveryProgress = 0.0f;
+            CurrentReviver = nullptr;
+            bCanBeHit = true;
+            GetCapsuleComponent()->SetCapsuleHalfHeight(88.0f);
+            GetCharacterMovement()->SetDefaultMovementMode();
+            GetCharacterMovement()->bOrientRotationToMovement = true;
+            GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            bUseControllerRotationYaw = false;
+            RestoreBodyAnimClass();
+        }
+    }
+
+    CurrentHealth = InHealth;
+    IsBeingCarried = bInBeingCarried;
+}
+
 void ATutorialCharacter::UpdateRemoteKiller(int32 PlayerId, FVector Location, float RotationYaw, float Forward, float Right, bool bSprint)
 {
     UWorld* World = GetWorld();
@@ -999,7 +1497,7 @@ void ATutorialCharacter::UpdateRemoteKiller(int32 PlayerId, FVector Location, fl
             Target->SetActorRotation(FRotator(0.0f, RotationYaw, 0.0f));
 
             // =========================================================
-            // [?µì‹¬ ì¶”ê?] ?œë²„?ì„œ ë°›ì? ? ë‹ˆë©”ì´???…ë ¥ê°’ì„ ?¬ëŸ¬?ê²Œ ì£¼ì…!
+            // [???–– ?°ë¶½?] ??•ì¾­?ë¨?½Œ è«›ì†? ?ì¢Šë•²ï§ë¶¿?????…ì °åª›ë???????ë¨?¾¶ äºŒì‡±??
             // =========================================================
             Target->RemoteForwardValue = Forward;
             Target->RemoteRightValue = Right;
@@ -1020,7 +1518,7 @@ void ATutorialCharacter::UpdateRemoteKiller(int32 PlayerId, FVector Location, fl
         NewKiller->MyPlayerId = PlayerId;
 
         // =========================================================
-        // [?µì‹¬ ì¶”ê?] ì²˜ìŒ ?¤í°???Œë„ ì´ˆê¸° ?´ë™ ê°’ì„ ?£ì–´ì¤ë‹ˆ??
+        // [???–– ?°ë¶½?] ï§£ì„????½ë£¿?????£„ ?¥ë‡ë¦???€ë£?åª›ë????ï½Œë¼±ä»¥ë¾???
         // =========================================================
         NewKiller->RemoteForwardValue = Forward;
         NewKiller->RemoteRightValue = Right;
@@ -1045,6 +1543,172 @@ void ATutorialCharacter::HandleNetworkAction(uint8 ActionType, int32 InstigatorI
         }
 
         ApplyGeneratorNetworkAction(ActionType, TargetId, Location, RotationYaw);
+        return;
+    }
+
+    if (ActionType == ACTION_SURVIVOR_REVIVE_START || ActionType == ACTION_SURVIVOR_REVIVE_CANCEL || ActionType == ACTION_SURVIVOR_REVIVE_COMPLETE)
+    {
+        ATutorialCharacter* Reviver = nullptr;
+        if (InstigatorId == MyPlayerId)
+        {
+            Reviver = this;
+        }
+        else if (RemotePlayers.Contains(InstigatorId) && IsValid(RemotePlayers[InstigatorId]))
+        {
+            Reviver = RemotePlayers[InstigatorId];
+        }
+
+        ATutorialCharacter* Survivor = nullptr;
+        if (TargetId == MyPlayerId)
+        {
+            Survivor = this;
+        }
+        else if (RemotePlayers.Contains(TargetId) && IsValid(RemotePlayers[TargetId]))
+        {
+            Survivor = RemotePlayers[TargetId];
+        }
+
+        if (ActionType == ACTION_SURVIVOR_REVIVE_START)
+        {
+            const float SyncedRecoveryProgress = FMath::Clamp(RotationYaw, 0.f, 1.f);
+
+            if (Reviver)
+            {
+                Reviver->IsInteracting = true;
+                Reviver->SetRevivingSurvivor(true);
+            }
+
+            if (Survivor)
+            {
+                Survivor->bIsBeingRevived = true;
+                Survivor->CurrentReviver = Reviver;
+                Survivor->RecoveryProgress = SyncedRecoveryProgress;
+            }
+
+            if (IsPlayerControlled() && IsLocallyControlled())
+            {
+                ShowReviveProgressWidget();
+                UpdateReviveProgressWidget(SyncedRecoveryProgress);
+            }
+        }
+        else if (ActionType == ACTION_SURVIVOR_REVIVE_CANCEL)
+        {
+            if (Reviver)
+            {
+                Reviver->StopInteractingWithCurrentTarget(true);
+            }
+
+            if (Survivor)
+            {
+                Survivor->bIsBeingRevived = false;
+                Survivor->RecoveryProgress = 0.0f;
+                Survivor->CurrentReviver = nullptr;
+            }
+
+            if (IsPlayerControlled() && IsLocallyControlled())
+            {
+                HideReviveProgressWidget();
+            }
+        }
+        else if (ActionType == ACTION_SURVIVOR_REVIVE_COMPLETE)
+        {
+            if (IsPlayerControlled() && IsLocallyControlled())
+            {
+                UpdateReviveProgressWidget(1.0f);
+                HideReviveProgressWidget();
+            }
+
+            if (Survivor && Survivor->IsDowned)
+            {
+                Survivor->CompleteInteract_Implementation();
+            }
+
+            if (Reviver)
+            {
+                Reviver->StopInteractingWithCurrentTarget(true);
+            }
+        }
+
+        return;
+    }
+
+    if (ActionType == ACTION_SELF_REVIVE_START || ActionType == ACTION_SELF_REVIVE_CANCEL || ActionType == ACTION_SELF_REVIVE_COMPLETE)
+    {
+        ATutorialCharacter* Survivor = nullptr;
+        if (TargetId == MyPlayerId)
+        {
+            Survivor = this;
+        }
+        else if (RemotePlayers.Contains(TargetId) && IsValid(RemotePlayers[TargetId]))
+        {
+            Survivor = RemotePlayers[TargetId];
+        }
+
+        if (!Survivor)
+        {
+            return;
+        }
+
+        if (ActionType == ACTION_SELF_REVIVE_START)
+        {
+            const float SyncedRecoveryProgress = FMath::Clamp(RotationYaw, 0.f, 1.f);
+
+            Survivor->bIsBeingRevived = true;
+            Survivor->bIsSelfReviving = true;
+            Survivor->IsInteracting = true;
+            Survivor->RecoveryProgress = SyncedRecoveryProgress;
+            Survivor->SetRevivingSurvivor(true);
+
+            if (IsPlayerControlled() && IsLocallyControlled())
+            {
+                ShowReviveProgressWidget();
+                UpdateReviveProgressWidget(SyncedRecoveryProgress);
+            }
+        }
+        else if (ActionType == ACTION_SELF_REVIVE_CANCEL)
+        {
+            Survivor->bIsBeingRevived = false;
+            Survivor->bIsSelfReviving = false;
+            Survivor->RecoveryProgress = 0.0f;
+            Survivor->IsInteracting = false;
+            Survivor->SetRevivingSurvivor(false);
+
+            if (IsPlayerControlled() && IsLocallyControlled())
+            {
+                HideReviveProgressWidget();
+            }
+        }
+        else if (ActionType == ACTION_SELF_REVIVE_COMPLETE)
+        {
+            if (IsPlayerControlled() && IsLocallyControlled())
+            {
+                UpdateReviveProgressWidget(1.0f);
+                HideReviveProgressWidget();
+            }
+
+            Survivor->bHasBandage = false;
+            if (Survivor->IsDowned)
+            {
+                Survivor->CompleteInteract_Implementation();
+            }
+        }
+
+        return;
+    }
+
+    if (ActionType == ACTION_BANDAGE_PICKUP)
+    {
+        ApplyBandageNetworkAction(TargetId, Location);
+
+        if (InstigatorId == MyPlayerId)
+        {
+            bHasBandage = true;
+        }
+        else if (RemotePlayers.Contains(InstigatorId) && IsValid(RemotePlayers[InstigatorId]))
+        {
+            RemotePlayers[InstigatorId]->bHasBandage = true;
+        }
+
         return;
     }
 
@@ -1147,6 +1811,39 @@ void ATutorialCharacter::PlayLoopBodyAnimation(UAnimSequence* Animation)
     GetMesh()->PlayAnimation(Animation, true);
 }
 
+void ATutorialCharacter::PlayRepairMontageStart()
+{
+    UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+    if (RepairMontage && AnimInstance)
+    {
+        const bool bIsAlreadyPlaying = AnimInstance->Montage_IsPlaying(RepairMontage);
+        if (!bIsAlreadyPlaying)
+        {
+            AnimInstance->Montage_Play(RepairMontage);
+        }
+
+        AnimInstance->Montage_JumpToSection(FName(TEXT("Start")), RepairMontage);
+        return;
+    }
+
+    if (RepairAnimation)
+    {
+        PlayLoopBodyAnimation(RepairAnimation);
+    }
+}
+
+void ATutorialCharacter::PlayRepairMontageEnd()
+{
+    UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+    if (RepairMontage && AnimInstance && AnimInstance->Montage_IsPlaying(RepairMontage))
+    {
+        AnimInstance->Montage_JumpToSection(FName(TEXT("End")), RepairMontage);
+        return;
+    }
+
+    RestoreBodyAnimClass();
+}
+
 void ATutorialCharacter::RestoreBodyAnimClass()
 {
     if (GetMesh() && !IsDowned && !IsBeingCarried)
@@ -1159,24 +1856,94 @@ void ATutorialCharacter::RestoreBodyAnimClass()
     }
 }
 
-// 1. ?í˜¸?‘ìš© ?œì‘
+void ATutorialCharacter::ApplyLocalPlayerInputMode()
+{
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (!PC || !PC->IsLocalController())
+    {
+        return;
+    }
+
+    FInputModeGameOnly InputMode;
+    PC->SetInputMode(InputMode);
+    PC->bShowMouseCursor = false;
+}
+void ATutorialCharacter::SetRevivingSurvivor(bool bReviving)
+{
+    if (bReviving)
+    {
+        if (RepairAnimation)
+        {
+            PlayLoopBodyAnimation(RepairAnimation);
+        }
+    }
+    else if (!bIsRepairingGenerator)
+    {
+        RestoreBodyAnimClass();
+    }
+}
+
+void ATutorialCharacter::StopInteractingWithCurrentTarget(bool bRestoreAnimation)
+{
+    IsInteracting = false;
+    SetRepairingGenerator(false);
+    HideReviveProgressWidget();
+    ReviveSyncAccumulator = 0.0f;
+
+    if (bRestoreAnimation)
+    {
+        SetRevivingSurvivor(false);
+    }
+}
+
+// 1. ?ê³¹ìƒ‡?ë¬’ìŠœ ??–ì˜‰
 void ATutorialCharacter::StartInteract_Implementation(ACharacter* Interactor)
 {
-    // ?´ê? ?„ì›Œ?ˆì„ ?Œë§Œ ?€?¸ì´ ?˜ë? ?´ë¦´ ???ˆìŒ
-    if (!IsDowned) return;
+    if (!IsDowned || IsBeingCarried || !Interactor) return;
 
+    ATutorialCharacter* Reviver = Cast<ATutorialCharacter>(Interactor);
+    if (!Reviver) return;
+
+    if (Reviver == this)
+    {
+        if (!bHasBandage) return;
+
+        bIsSelfReviving = true;
+        bIsBeingRevived = true;
+        RecoveryProgress = 0.0f;
+        CurrentReviver = nullptr;
+        ShowReviveProgressWidget();
+        UpdateReviveProgressWidget(0.0f);
+        UE_LOG(LogTemp, Warning, TEXT("Started self revive with bandage."));
+        return;
+    }
+
+    CurrentReviver = Reviver;
+    bIsSelfReviving = false;
+    bIsBeingRevived = true;
+    RecoveryProgress = 0.0f;
+    Reviver->ShowReviveProgressWidget();
+    Reviver->UpdateReviveProgressWidget(0.0f);
     UE_LOG(LogTemp, Warning, TEXT("Someone is healing me!"));
 }
 
-// 2. ?í˜¸?‘ìš© ?…ë°?´íŠ¸ (ì§„í–‰)
+// 2. ?ê³¹ìƒ‡?ë¬’ìŠœ ??…ëœ²??„ë“ƒ (ï§ê¾ªë»?
 void ATutorialCharacter::UpdateInteract_Implementation(float DeltaTime)
 {
     if (!IsDowned) return;
+    if (!bIsSelfReviving && !CurrentReviver.IsValid()) return;
 
-    RecoveryProgress += DeltaTime / MaxRecoveryTime;
+    const float RecoveryTime = bIsSelfReviving ? SelfRecoveryTime : MaxRecoveryTime;
+    RecoveryProgress += DeltaTime / RecoveryTime;
     RecoveryProgress = FMath::Clamp(RecoveryProgress, 0.f, 1.f);
-
-    // GEngine->AddOnScreenDebugMessage(...) ?? œ
+    if (bIsSelfReviving)
+    {
+        UpdateReviveProgressWidget(RecoveryProgress);
+    }
+    else if (CurrentReviver.IsValid())
+    {
+        CurrentReviver->UpdateReviveProgressWidget(RecoveryProgress);
+    }
 
     if (RecoveryProgress >= 1.0f)
     {
@@ -1184,32 +1951,68 @@ void ATutorialCharacter::UpdateInteract_Implementation(float DeltaTime)
     }
 }
 
-// 3. ?í˜¸?‘ìš© ì·¨ì†Œ
+// 3. ?ê³¹ìƒ‡?ë¬’ìŠœ ?â‘¥??
 void ATutorialCharacter::CancelInteract_Implementation()
 {
-    // ì¹˜ë£Œë°›ë‹¤ê°€ ì¤‘ë‹¨??
+    if (bIsSelfReviving)
+    {
+        HideReviveProgressWidget();
+    }
+    else if (CurrentReviver.IsValid())
+    {
+        CurrentReviver->HideReviveProgressWidget();
+    }
+    bIsBeingRevived = false;
+    bIsSelfReviving = false;
+    RecoveryProgress = 0.0f;
+    CurrentReviver = nullptr;
+    IsInteracting = false;
+    CurrentInteractable = nullptr;
     UE_LOG(LogTemp, Warning, TEXT("Healing interrupted."));
 }
 
-// 4. ?í˜¸?‘ìš© ?„ë£Œ (ë¶€??
+// 4. ?ê³¹ìƒ‡?ë¬’ìŠœ ?ê¾¨ì¦º (?ºÂ€??
 void ATutorialCharacter::CompleteInteract_Implementation()
 {
     if (!IsDowned) return;
 
     IsDowned = false;
-    CurrentHealth = 1; // ë¶€???íƒœë¡?ë³µêµ¬
-    RecoveryProgress = 0.0f;
+    IsBeingCarried = false;
+    if (bIsSelfReviving)
+    {
+        UpdateReviveProgressWidget(1.0f);
+        HideReviveProgressWidget();
+    }
+    else if (CurrentReviver.IsValid())
+    {
+        CurrentReviver->UpdateReviveProgressWidget(1.0f);
+        CurrentReviver->HideReviveProgressWidget();
+    }
 
-    // ìº¡ìŠ ?’ì´?€ ?´ë™ ?¥ë ¥ ë³µêµ¬
+    bIsBeingRevived = false;
+    bIsSelfReviving = false;
+    CurrentHealth = 1; // ?ºÂ€???ê³¹ê¹­æ¿?è¹‚ë“¦??
+    RecoveryProgress = 0.0f;
+    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+    // ï§¦â‰ª???ë¯ªì” ?? ??€ë£??Î»??è¹‚ë“¦??
     GetCapsuleComponent()->SetCapsuleHalfHeight(88.0f);
     GetCharacterMovement()->SetDefaultMovementMode();
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    bUseControllerRotationYaw = false;
+    bCanBeHit = true;
+    CurrentReviver = nullptr;
 
-    // ? ë‹ˆë©”ì´??ë³µêµ¬ ë¡œì§ ?¸ì¶œ
+    // ?ì¢Šë•²ï§ë¶¿???è¹‚ë“¦??æ¿¡ì’–ì­??ëª„í…§
     RestoreBodyAnimClass();
 
     UE_LOG(LogTemp, Warning, TEXT("Survivor has been revived!"));
 }
 
-
+float ATutorialCharacter::GetInteractDuration_Implementation() const
+{
+    return bIsSelfReviving ? SelfRecoveryTime : MaxRecoveryTime;
+}
 
 

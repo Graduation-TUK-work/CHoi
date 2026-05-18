@@ -2,46 +2,51 @@
 
 #include "CoreMinimal.h"
 #include "Styling/SlateBrush.h"
-#include "Styling/SlateTypes.h"
 #include "GameFramework/Character.h"
 #include "MotionWarpingComponent.h"
 #include "MyProject_Start/InteractionInterface.h"
 #include "TutorialCharacter.generated.h"
 
-// ★ 전방 선언은 UCLASS() 위쪽으로 옮겨야 합니다.
 class FNetworkWorker;
 class AKillerCharacter;
 class AGenerator;
+class ABandagePickup;
+class AParkourInteractable;
 class UAnimSequence;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UTexture2D;
-class SProgressBar;
 class SImage;
 class STextBlock;
+class SProgressBar;
+class SWidget;
 
-UCLASS() // UCLASS와 class ATutorialCharacter 사이에는 아무것도 없어야 합니다.
+UCLASS()
 class MYPROJECT_START_API ATutorialCharacter : public ACharacter, public IInteractionInterface
 {
 	GENERATED_BODY()
 
 public:
-	// 상호작용 인터페이스 구현
 	virtual void StartInteract_Implementation(ACharacter* Interactor) override;
 	virtual void UpdateInteract_Implementation(float DeltaTime) override;
 	virtual void CancelInteract_Implementation() override;
 	virtual void CompleteInteract_Implementation() override;
+	virtual float GetInteractDuration_Implementation() const override;
 
-	// 회복 관련 변수
 	UPROPERTY(BlueprintReadOnly, Category = "Health")
 	float RecoveryProgress = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
-	float MaxRecoveryTime = 4.0f;
+	float MaxRecoveryTime = 5.33f;
 
-	// 블루프린트에서 호출할 수 있도록 Callable 추가
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
+	float SelfRecoveryTime = 8.0f;
+
 	UFUNCTION(BlueprintCallable, Category = "PlayerState")
 	void ForceDownedState();
+
+	UFUNCTION(BlueprintCallable, Category = "PlayerState")
+	void ForceInjuredState();
 
 	ATutorialCharacter();
 	void MoveForward(float Value);
@@ -79,17 +84,35 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
 	UAnimSequence* RepairAnimation;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	class UAnimMontage* RepairMontage;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	bool IsDowned = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	bool IsBeingCarried = false;
 
-	void UpdateRemotePlayer(int32 PlayerId, FVector Location, float RotationYaw, float Forward, float Right, bool bSprint);
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	bool bIsBeingRevived = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	bool bIsSelfReviving = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	bool bHasBandage = false;
+
+	void UpdateRemotePlayer(int32 PlayerId, FVector Location, float RotationYaw, float Forward, float Right, bool bSprint, int32 InHealth, bool bInDowned, bool bInBeingCarried);
 	void UpdateRemoteKiller(int32 PlayerId, FVector Location, float RotationYaw, float Forward, float Right, bool bSprint);
 	void HandleNetworkAction(uint8 ActionType, int32 InstigatorId, int32 TargetId, FVector Location, float RotationYaw);
 	void SendGeneratorActionToServer(uint8 ActionType, AGenerator* Generator);
+	void SendBandageActionToServer(uint8 ActionType, ABandagePickup* BandagePickup);
 	void SetRepairingGenerator(bool bRepairing);
+	void SetRevivingSurvivor(bool bReviving);
+	void StopInteractingWithCurrentTarget(bool bRestoreAnimation);
+	void StartVaultFromInteractable(AParkourInteractable* ParkourInteractable);
+	bool HasBandage() const { return bHasBandage; }
+	void SetHasBandage(bool bNewHasBandage) { bHasBandage = bNewHasBandage; }
 
 	UPROPERTY(BlueprintReadOnly, Category = "NetworkData")
 	float RemoteForwardValue;
@@ -101,6 +124,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void PossessedBy(AController* NewController) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Status")
 	int32 CurrentHealth = 2;
@@ -110,6 +134,12 @@ protected:
 
 public:
 	virtual void Tick(float DeltaTime) override;
+
+	UFUNCTION(BlueprintPure, Category = "Status")
+	bool IsInjured() const { return CurrentHealth == 1 && !IsDowned && !IsBeingCarried; }
+
+	UFUNCTION(BlueprintPure, Category = "Status")
+	int32 GetCurrentHealth() const { return CurrentHealth; }
 
 	UFUNCTION(BlueprintCallable)
 	void SetCanVault(bool CanIt) { bCanVault = CanIt; }
@@ -135,6 +165,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void PlayHitReaction();
 	void PlayNetworkHitReaction();
+	void SyncRemoteState(int32 InHealth, bool bInDowned, bool bInBeingCarried);
 
 	FNetworkWorker* NetworkWorker;
 
@@ -170,25 +201,40 @@ private:
 	void ShowGeneratorRepairWidget(AGenerator* Generator);
 	void UpdateGeneratorRepairWidget(AGenerator* Generator);
 	void HideGeneratorRepairWidget();
+    void ShowReviveProgressWidget();
+    void UpdateReviveProgressWidget(float Progress);
+    void HideReviveProgressWidget();
 	AGenerator* FindGeneratorForNetworkAction(int32 GeneratorId, const FVector& Location) const;
+	ABandagePickup* FindBandageForNetworkAction(int32 BandageId, const FVector& Location) const;
 	void ApplyGeneratorNetworkAction(uint8 ActionType, int32 GeneratorId, const FVector& Location, float RepairProgress);
+	void ApplyBandageNetworkAction(int32 BandageId, const FVector& Location);
+	void SendSurvivorActionToServer(uint8 ActionType, ATutorialCharacter* TargetCharacter);
 	void ApplyHitReaction(bool bRespectCooldown);
 	void PlayTemporaryBodyAnimation(UAnimSequence* Animation);
 	void PlayLoopBodyAnimation(UAnimSequence* Animation);
+	void PlayRepairMontageStart();
+	void PlayRepairMontageEnd();
 	void RestoreBodyAnimClass();
+	void ApplyLocalPlayerInputMode();
+	bool CanStartVault() const;
+	void BeginVaultToLocation(const FVector& TargetLocation);
+	void FinishVault();
+
 	TSharedPtr<SWidget> GeneratorRepairWidget;
 	TSharedPtr<SImage> GeneratorRepairProgressImage1;
 	TSharedPtr<SImage> GeneratorRepairProgressImage2;
 	TSharedPtr<SImage> GeneratorRepairProgressImage3;
 	TSharedPtr<STextBlock> GeneratorRepairText;
+    TSharedPtr<SWidget> ReviveProgressWidget;
+    TSharedPtr<SProgressBar> ReviveProgressBar;
+    TSharedPtr<STextBlock> ReviveProgressText;
 	FSlateBrush GeneratorRepairBackgroundBrush;
-	FSlateBrush GeneratorRepairFillBrush;
 	FSlateBrush GeneratorRepairFillBrush1;
 	FSlateBrush GeneratorRepairFillBrush2;
 	FSlateBrush GeneratorRepairFillBrush3;
-	FProgressBarStyle GeneratorRepairProgressBarStyle;
 	float GeneratorRepairProgressValues[3] = { 0.f, 0.f, 0.f };
 	float GeneratorRepairSyncAccumulator = 0.f;
+	float ReviveSyncAccumulator = 0.f;
 
 	UPROPERTY(Transient)
 	UTexture2D* GeneratorRepairBackgroundTexture = nullptr;
@@ -204,4 +250,7 @@ private:
 
 	UPROPERTY(Transient)
 	UMaterialInstanceDynamic* GeneratorRepairFillMID3 = nullptr;
+
+	TWeakObjectPtr<ATutorialCharacter> CurrentReviver;
+	FTimerHandle VaultFinishTimerHandle;
 };
